@@ -1,4 +1,4 @@
--- Fling Controller v13.0 (полностью рабочий, меню открывается)
+-- Fling Controller v16.0 (полная версия, открывается по правому Shift)
 local Player = game.Players.LocalPlayer
 local function getCharacter()
     return Player.Character or Player.CharacterAdded:Wait()
@@ -9,8 +9,7 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 wait(0.5)
 
-print("✅ Скрипт загружен, создаю GUI...")
-
+-- Конфигурация
 local CONFIG = {
     FLING_POWER = 63,
     FOLLOW_DISTANCE = 2.5,
@@ -52,6 +51,19 @@ local aimbotConnections = {}
 local fovCircle = nil
 local sheriffLine = nil
 local keyBindMode = nil
+
+-- ===== Переподключение при смене персонажа =====
+local function refreshCharacter()
+    Character = getCharacter()
+    RootPart = Character:WaitForChild("HumanoidRootPart")
+    Humanoid = Character:WaitForChild("Humanoid")
+    if enabled and TARGET then flyUnder(TARGET) end
+    startAimbot()
+    updateSelfHitbox()
+    updateFovCircle()
+    updateSheriffWeaponLine()
+end
+Player.CharacterAdded:Connect(refreshCharacter)
 
 -- ===== Основные функции =====
 local function getTargetByName(name)
@@ -125,16 +137,13 @@ local function flyUnder(target)
         local targetPos = target.Character.HumanoidRootPart.Position
         local underPos = targetPos - Vector3.new(0, CONFIG.FOLLOW_DISTANCE, 0)
         local direction = (underPos - RootPart.Position)
-        -- Жёсткое следование: если расстояние больше 5 — телепорт, иначе скорость
         if direction.Magnitude > 5 then
-            RootPart.CFrame = CFrame.new(underPos)
+            RootPart.CFrame = CFrame.new(underPos)  -- телепорт при большом расстоянии
         else
             bv.Velocity = direction * CONFIG.FLY_SPEED
         end
-        -- Лежачее положение
         local rot = CFrame.Angles(math.rad(90), 0, 0)
         RootPart.CFrame = CFrame.new(RootPart.Position) * rot
-        -- Flyjump (авто-подкидывание)
         if flyjumpActive then
             if tick() - lastFling > CONFIG.FLING_INTERVAL then
                 flingTarget(target)
@@ -380,19 +389,6 @@ local function startAimbot()
 end
 startAimbot()
 
--- ===== Переподключение персонажа =====
-local function refreshCharacter()
-    Character = getCharacter()
-    RootPart = Character:WaitForChild("HumanoidRootPart")
-    Humanoid = Character:WaitForChild("Humanoid")
-    if enabled and TARGET then flyUnder(TARGET) end
-    startAimbot()
-    updateSelfHitbox()
-    updateFovCircle()
-    updateSheriffWeaponLine()
-end
-Player.CharacterAdded:Connect(refreshCharacter)
-
 -- ===== Биндинг клавиш =====
 local function updateBindings()
     local inputService = game:GetService("UserInputService")
@@ -436,7 +432,6 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlingMenu"
 screenGui.Parent = Player.PlayerGui
 screenGui.ResetOnSpawn = false
-print("✅ ScreenGui создан")
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 520, 0, 600)
@@ -451,7 +446,6 @@ mainFrame.Parent = screenGui
 local cornerMain = Instance.new("UICorner")
 cornerMain.CornerRadius = UDim.new(0, 25)
 cornerMain.Parent = mainFrame
-print("✅ MainFrame создан")
 
 -- Градиентный фон
 local bgGradient = Instance.new("UIGradient")
@@ -530,7 +524,7 @@ closeScriptBtn.MouseButton1Click:Connect(function()
     if fovCircle then fovCircle:Destroy() end
     if sheriffLine then sheriffLine.line:Destroy(); sheriffLine.connection:Disconnect() end
     screenGui:Destroy()
-    print("❌ Скрипт остановлен.")
+    print("Скрипт остановлен.")
 end)
 
 -- Палитра цветов фона
@@ -638,7 +632,7 @@ flyjumpBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка выбора цели
+-- Кнопка выбора цели (отдельное окно слева)
 local playerListBtn = Instance.new("TextButton")
 playerListBtn.Size = UDim2.new(0.8,0,0,30)
 playerListBtn.Position = UDim2.new(0.1,0,0,205)
@@ -727,7 +721,7 @@ playerListBtn.MouseButton1Click:Connect(function()
     if playerListFrame.Visible then updatePlayerListWindow() end
 end)
 
--- Горизонтальные вкладки
+-- ===== Горизонтальные вкладки =====
 local tabContainer = Instance.new("Frame")
 tabContainer.Size = UDim2.new(1,0,0,30)
 tabContainer.Position = UDim2.new(0,0,0,245)
@@ -784,7 +778,7 @@ if #tabs > 0 then
     tabButtons[tabs[1]].MouseButton1Click:Fire()
 end
 
--- Функции создания элементов
+-- ===== Функции создания элементов внутри вкладок =====
 local function createSliderInTab(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6,0,0,22)
@@ -882,12 +876,8 @@ local function createToggleInTab(parent, labelText, yPos, getter, setter)
         btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
         if labelText:find("FOV") then updateFovCircle()
         elseif labelText:find("Линии") then updateSheriffWeaponLine()
-        elseif labelText:find("Хитбокс") then updateSelfHitbox()
         elseif labelText:find("ESP") then updateESP()
         elseif labelText:find("Аимбот") then startAimbot()
-        elseif labelText:find("Flyjump") then
-            CONFIG.FLYJUMP_ENABLED = getter()
-            if enabled then flyjumpActive = CONFIG.FLYJUMP_ENABLED end
         end
     end)
     return btn
@@ -960,7 +950,7 @@ local function createKeyBindInTab(parent, labelText, yPos, bindKey)
     end)
 end
 
--- Заполнение вкладок
+-- ===== Заполнение вкладок =====
 local flingContent = contentFrames["Fling"]
 createSliderInTab(flingContent, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
 createSliderInTab(flingContent, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
@@ -977,7 +967,11 @@ createColorPickerInTab(espContent, "Свой: ", 125, function() return CONFIG.E
 createKeyBindInTab(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
 
 local hitboxContent = contentFrames["Хитбокс"]
-createSliderInTab(hitboxContent, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
+createSliderInTab(hitboxContent, "Размер хитбокса: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
+-- При изменении размера обновляем хитбокс
+hitboxContent.ChildAdded:Connect(function()
+    updateSelfHitbox()
+end)
 
 local fovContent = contentFrames["FOV"]
 createToggleInTab(fovContent, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
@@ -998,7 +992,7 @@ createKeyBindInTab(aimbotContent, "Бинд Аимбот: ", 140, CONFIG.BIND_AI
 local bindContent = contentFrames["Бинды"]
 createKeyBindInTab(bindContent, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
 
--- ===== Открытие меню =====
+-- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
