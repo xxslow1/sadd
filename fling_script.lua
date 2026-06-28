@@ -26,10 +26,6 @@ local CONFIG = {
     FOV_CIRCLE_COLOR = Color3.fromRGB(0,200,255),
     SHERIFF_WEAPON_LINE_ENABLED = true,
     SHERIFF_WEAPON_LINE_COLOR = Color3.fromRGB(255,200,0),
-    BIND_FLING = Enum.KeyCode.F,
-    BIND_FLYJUMP = Enum.KeyCode.G,
-    BIND_AIMBOT = Enum.KeyCode.H,
-    BIND_ESP = Enum.KeyCode.Z,
 }
 
 local TARGET = nil
@@ -44,9 +40,7 @@ local selfHitbox = nil
 local aimbotConnections = {}
 local fovCircle = nil
 local sheriffLine = nil
-local keyBindMode = nil
 
--- ===== Основные функции =====
 local function getTarget()
     if CONFIG.TARGET_NAME and CONFIG.TARGET_NAME ~= "" then
         local plr = game.Players:FindFirstChild(CONFIG.TARGET_NAME)
@@ -127,7 +121,6 @@ local function flyUnder(target)
     end)
 end
 
--- ===== Хитбокс себя =====
 local function updateSelfHitbox()
     if selfHitbox then selfHitbox:Destroy(); selfHitbox = nil end
     if not RootPart then return end
@@ -142,7 +135,6 @@ local function updateSelfHitbox()
     selfHitbox.Parent = RootPart
 end
 
--- ===== ESP =====
 local function clearESP()
     for _, box in pairs(espBoxes) do
         if box and box.Parent then box:Destroy() end
@@ -193,7 +185,6 @@ end
 game.Players.PlayerAdded:Connect(updateESP)
 game.Players.PlayerRemoving:Connect(updateESP)
 
--- ===== FOV круг =====
 local function updateFovCircle()
     if fovCircle then fovCircle:Destroy(); fovCircle = nil end
     if not CONFIG.FOV_CIRCLE_ENABLED then return end
@@ -224,7 +215,6 @@ local function updateFovCircle()
     corner2.Parent = inner
 end
 
--- ===== Линии к оружию шерифа =====
 local function updateSheriffWeaponLine()
     if sheriffLine then
         if sheriffLine.line then sheriffLine.line:Destroy() end
@@ -273,7 +263,6 @@ local function updateSheriffWeaponLine()
     sheriffLine = {line = line, connection = conn}
 end
 
--- ===== Аимбот =====
 local VirtualUser = game:GetService("VirtualUser")
 local function getAimbotTarget(weapon, isMurderer, isSheriff)
     local camera = workspace.CurrentCamera
@@ -356,45 +345,6 @@ local function startAimbot()
 end
 startAimbot()
 
--- ===== Биндинг клавиш =====
-local function updateBindings()
-    local inputService = game:GetService("UserInputService")
-    inputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if keyBindMode then
-            if input.KeyCode ~= Enum.KeyCode.Unknown then
-                if keyBindMode == "FLING" then CONFIG.BIND_FLING = input.KeyCode
-                elseif keyBindMode == "FLYJUMP" then CONFIG.BIND_FLYJUMP = input.KeyCode
-                elseif keyBindMode == "AIMBOT" then CONFIG.BIND_AIMBOT = input.KeyCode
-                elseif keyBindMode == "ESP" then CONFIG.BIND_ESP = input.KeyCode end
-                keyBindMode = nil
-                statusLabel.Text = "Клавиша назначена!"
-                statusLabel.TextColor3 = Color3.fromRGB(0,255,0)
-                wait(1)
-                if enabled then
-                    statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
-                    statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
-                else
-                    statusLabel.Text = "Выключено"
-                    statusLabel.TextColor3 = Color3.fromRGB(255,70,70)
-                end
-            end
-            return
-        end
-        if input.KeyCode == CONFIG.BIND_FLING then
-            toggleBtn.MouseButton1Click:Fire()
-        elseif input.KeyCode == CONFIG.BIND_FLYJUMP then
-            if flyjumpBtn then flyjumpBtn.MouseButton1Click:Fire() end
-        elseif input.KeyCode == CONFIG.BIND_AIMBOT then
-            if aimbotToggle then aimbotToggle.MouseButton1Click:Fire() end
-        elseif input.KeyCode == CONFIG.BIND_ESP then
-            if espToggle then espToggle.MouseButton1Click:Fire() end
-        end
-    end)
-end
-updateBindings()
-
--- ===== GUI =====
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlingMenu"
 screenGui.Parent = Player.PlayerGui
@@ -491,7 +441,6 @@ closeScriptBtn.MouseButton1Click:Connect(function()
     print("Скрипт остановлен.")
 end)
 
--- Палитра цветов фона
 local paletteFrame = Instance.new("Frame")
 paletteFrame.Size = UDim2.new(1,0,0,30)
 paletteFrame.Position = UDim2.new(0,0,0,60)
@@ -524,7 +473,6 @@ for i, color in ipairs(colors) do
     end)
 end
 
--- Статус
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1,0,0,30)
 statusLabel.Position = UDim2.new(0,0,0,95)
@@ -535,7 +483,6 @@ statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.GothamSemibold
 statusLabel.Parent = mainFrame
 
--- Кнопка включения
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0.8,0,0,35)
 toggleBtn.Position = UDim2.new(0.1,0,0,130)
@@ -567,7 +514,6 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка Flyjump
 local flyjumpBtn = Instance.new("TextButton")
 flyjumpBtn.Size = UDim2.new(0.8,0,0,30)
 flyjumpBtn.Position = UDim2.new(0.1,0,0,170)
@@ -596,7 +542,6 @@ flyjumpBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка выбора цели
 local playerListBtn = Instance.new("TextButton")
 playerListBtn.Size = UDim2.new(0.8,0,0,30)
 playerListBtn.Position = UDim2.new(0.1,0,0,205)
@@ -611,7 +556,6 @@ local cornerPL = Instance.new("UICorner")
 cornerPL.CornerRadius = UDim.new(0,10)
 cornerPL.Parent = playerListBtn
 
--- Окно списка игроков (слева)
 local playerListFrame = Instance.new("Frame")
 playerListFrame.Size = UDim2.new(0, 200, 0, 300)
 playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
@@ -685,21 +629,20 @@ playerListBtn.MouseButton1Click:Connect(function()
     if playerListFrame.Visible then updatePlayerListWindow() end
 end)
 
--- ===== Горизонтальные вкладки (как цвета) =====
 local tabContainer = Instance.new("Frame")
 tabContainer.Size = UDim2.new(1,0,0,30)
 tabContainer.Position = UDim2.new(0,0,0,245)
 tabContainer.BackgroundTransparency = 1
 tabContainer.Parent = mainFrame
 
-local tabs = {"Fling", "ESP", "Хитбокс", "FOV", "Линии", "Аимбот", "Бинды"}
+local tabs = {"Fling", "ESP", "Хитбокс", "FOV", "Линии", "Аимбот"}
 local tabButtons = {}
 local contentFrames = {}
 
 for i, tabName in ipairs(tabs) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.12,0,1,0)
-    btn.Position = UDim2.new(0.02 + (i-1)*0.13, 0, 0, 0)
+    btn.Size = UDim2.new(0.13,0,1,0)
+    btn.Position = UDim2.new(0.025 + (i-1)*0.14, 0, 0, 0)
     btn.BackgroundColor3 = Color3.fromRGB(40,45,60)
     btn.Text = tabName
     btn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -735,10 +678,8 @@ for i, tabName in ipairs(tabs) do
     end)
 end
 
--- Открыть первую вкладку
 tabButtons[tabs[1]].MouseButton1Click:Fire()
 
--- ===== Функции создания элементов внутри вкладок =====
 local function createSlider(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6,0,0,22)
@@ -879,45 +820,11 @@ local function createColorPicker(parent, labelText, yPos, getter, setter)
     end)
 end
 
-local function createKeyBind(parent, labelText, yPos, bindKey)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.4,0,0,22)
-    label.Position = UDim2.new(0.05,0,0,yPos)
-    label.BackgroundTransparency = 1
-    label.Text = labelText
-    label.TextColor3 = Color3.fromRGB(200,200,220)
-    label.TextScaled = true
-    label.Font = Enum.Font.Gotham
-    label.Parent = parent
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.3,0,0,25)
-    btn.Position = UDim2.new(0.5,0,0,yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
-    btn.Text = tostring(bindKey):gsub("Enum.KeyCode.", "")
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.TextScaled = true
-    btn.Font = Enum.Font.Gotham
-    btn.BorderSizePixel = 0
-    btn.Parent = parent
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0,8)
-    corner.Parent = btn
-    btn.MouseButton1Click:Connect(function()
-        keyBindMode = labelText:gsub(": ", "")
-        statusLabel.Text = "Нажмите клавишу для " .. labelText
-        statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
-        btn.Text = "..."
-    end)
-end
-
--- ===== Заполнение вкладок =====
 local flingContent = contentFrames["Fling"]
 createSlider(flingContent, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
 createSlider(flingContent, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
 createSlider(flingContent, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
 createSlider(flingContent, "Скорость Fly: ", 105, 1, 50, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
-createKeyBind(flingContent, "Бинд Fling: ", 140, CONFIG.BIND_FLING)
 
 local espContent = contentFrames["ESP"]
 createToggle(espContent, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
@@ -925,11 +832,10 @@ createColorPicker(espContent, "Обычные: ", 35, function() return CONFIG.E
 createColorPicker(espContent, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
 createColorPicker(espContent, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
 createColorPicker(espContent, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
-createKeyBind(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
 
 local hitboxContent = contentFrames["Хитбокс"]
 createSlider(hitboxContent, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v; updateSelfHitbox() end)
-createToggle(hitboxContent, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v) -- привязано к ESP
+createToggle(hitboxContent, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v)
 
 local fovContent = contentFrames["FOV"]
 createToggle(fovContent, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
@@ -945,12 +851,7 @@ createToggle(aimbotContent, "Аимбот: ", 0, function() return CONFIG.AIMBOT
 createSlider(aimbotContent, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
 createSlider(aimbotContent, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
 createSlider(aimbotContent, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
-createKeyBind(aimbotContent, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
 
-local bindContent = contentFrames["Бинды"]
-createKeyBind(bindContent, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
-
--- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
