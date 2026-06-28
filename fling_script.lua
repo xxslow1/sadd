@@ -5,23 +5,29 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 
 -- Настройки
-local FLING_POWER = 150 -- сила подкидывания
-local FOLLOW_DISTANCE = 3 -- расстояние под игроком
-local TARGET = nil -- цель, можно установить по имени или выбрать ближайшего
+local FLING_POWER = 150        -- сила подкидывания
+local FOLLOW_DISTANCE = 3      -- расстояние под игроком
+local FLY_SPEED = 5            -- скорость полёта
+local FLING_INTERVAL = 0.5     -- интервал между подкидываниями (сек)
+local KEY_TOGGLE = Enum.KeyCode.F  -- клавиша для включения/выключения
 
--- Функция для поиска игрока по имени или ближайшего
+local TARGET = nil
+local enabled = false
+local bv = nil
+local lastFling = 0
+
+-- Функция для поиска ближайшего игрока
 local function getTarget(name)
     if name then
         return game.Players:FindFirstChild(name)
     else
-        -- ближайший
         local nearest = nil
         local dist = math.huge
         for _, plr in ipairs(game.Players:GetPlayers()) do
             if plr ~= Player then
                 local char = plr.Character
                 if char and char:FindFirstChild("HumanoidRootPart") then
-                    local d = (RootPart.Position - char.HumanoidRootPart.Position).magnitude
+                    local d = (RootPart.Position - char.HumanoidRootPart.Position).Magnitude
                     if d < dist then
                         dist = d
                         nearest = plr
@@ -40,75 +46,80 @@ local function flingTarget(target)
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    -- Устанавливаем вертикальную скорость
     root.Velocity = Vector3.new(0, FLING_POWER, 0)
-    -- Можно также добавить случайное горизонтальное смещение
 end
 
--- Создаем BodyVelocity для нашего персонажа, чтобы летать под целью
+-- Основная функция полёта под целью
 local function flyUnder(target)
     if not target then return end
     local targetChar = target.Character
     if not targetChar then return end
     local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
     if not targetRoot then return end
-    
-    -- Создаем BodyVelocity в нашем RootPart
-    local bv = Instance.new("BodyVelocity")
+
+    -- Создаём BodyVelocity
+    bv = Instance.new("BodyVelocity")
     bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
     bv.Velocity = Vector3.new(0, 0, 0)
     bv.Parent = RootPart
-    
-    -- Отключаем гравитацию для нас (можно через Humanoid)
+
+    -- Отключаем гравитацию
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
     Humanoid.PlatformStand = true
-    
-    -- Цикл обновления позиции под целью
+
+    -- Цикл обновления
     game:GetService("RunService").Heartbeat:Connect(function()
         if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-            bv:Destroy()
+            if bv then bv:Destroy() end
             Humanoid.PlatformStand = false
             Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
             Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+            enabled = false
             return
         end
+
         local targetPos = target.Character.HumanoidRootPart.Position
         local underPos = targetPos - Vector3.new(0, FOLLOW_DISTANCE, 0)
-        -- Устанавливаем скорость, чтобы двигаться к underPos
         local currentPos = RootPart.Position
         local direction = (underPos - currentPos)
-        -- Если далеко, телепортируем, иначе плавно летим
-        if direction.magnitude > 10 then
+
+        if direction.Magnitude > 10 then
             RootPart.CFrame = CFrame.new(underPos)
         else
-            bv.Velocity = direction * 5 -- скорость полета
+            bv.Velocity = direction * FLY_SPEED
         end
-        -- Подкидываем цель каждые 0.5 секунды
-        if not lastFling or tick() - lastFling > 0.5 then
+
+        -- Подкидываем цель
+        if tick() - lastFling > FLING_INTERVAL then
             flingTarget(target)
             lastFling = tick()
         end
     end)
 end
 
--- Инициализация: выбираем цель (можно изменить на конкретное имя)
-TARGET = getTarget() -- ближайший
-
-if TARGET then
-    flyUnder(TARGET)
-    print("Теперь вы летаете под игроком " .. TARGET.Name .. " и подкидываете его!")
-else
-    print("Не найден игрок для цели.")
-end
-
--- Остановка по нажатию клавиши (например, G)
-game:GetService("UserInputService").InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.G then
-        -- остановить скрипт (перезагрузить?)
-        -- Просто выведем сообщение
-        print("Остановка. Перезапустите скрипт для активации.")
-        -- можно сломать, но для простоты ничего не делаем
+-- Включение/выключение по клавише
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == KEY_TOGGLE then
+        enabled = not enabled
+        if enabled then
+            TARGET = getTarget(nil)
+            if TARGET then
+                flyUnder(TARGET)
+            else
+                print("Нет игроков поблизости!")
+                enabled = false
+            end
+        else
+            -- Выключаем
+            if bv then bv:Destroy() end
+            Humanoid.PlatformStand = false
+            Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+            print("Выключено")
+        end
     end
 end)
+
+print("Скрипт загружен! Нажмите F, чтобы включить/выключить.")
