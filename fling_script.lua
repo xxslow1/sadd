@@ -1,5 +1,5 @@
--- Fling Controller v11.0
--- Работает во всех режимах MM2: лобби, игра, после смерти, при смене персонажа
+-- Fling Controller v11.5
+-- Разделы меню в горизонтальной линии, как цвета
 local Player = game.Players.LocalPlayer
 local function getCharacter()
     return Player.Character or Player.CharacterAdded:Wait()
@@ -10,9 +10,8 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 wait(0.5)
 
--- Конфигурация
 local CONFIG = {
-    FLING_POWER = 63,          -- ровно 10 блоков вверх
+    FLING_POWER = 63,
     FOLLOW_DISTANCE = 3,
     FLY_SPEED = 25,
     FLING_INTERVAL = 0.5,
@@ -53,7 +52,7 @@ local fovCircle = nil
 local sheriffLine = nil
 local keyBindMode = nil
 
--- ===== Обновление персонажа при респавне =====
+-- ===== Переподключение при смене персонажа =====
 local function refreshCharacter()
     Character = getCharacter()
     RootPart = Character:WaitForChild("HumanoidRootPart")
@@ -154,7 +153,7 @@ local function flyUnder(target)
     end)
 end
 
--- ===== Хитбокс себя (увеличенный) =====
+-- ===== Хитбокс себя =====
 local function updateSelfHitbox()
     if selfHitbox then selfHitbox:Destroy(); selfHitbox = nil end
     if not RootPart then return end
@@ -169,7 +168,7 @@ local function updateSelfHitbox()
     selfHitbox.Parent = RootPart
 end
 
--- ===== ESP (подсветка игроков по всей карте) =====
+-- ===== ESP =====
 local function clearESP()
     for plr, box in pairs(espBoxes) do if box and box.Parent then box:Destroy() end end
     espBoxes = {}
@@ -266,18 +265,6 @@ local function updateSheriffWeaponLine()
         sheriffLine = nil
     end
     if not CONFIG.SHERIFF_WEAPON_LINE_ENABLED then return end
-    -- Ищем мёртвого шерифа (нет персонажа) и его оружие в workspace
-    local sheriff = nil
-    for _, plr in ipairs(game.Players:GetPlayers()) do
-        if plr ~= Player then
-            local char = plr.Character
-            if not char or not char.Parent then
-                -- возможно, мёртв, но оружие могло выпасть
-                -- проверим, был ли он шерифом (по оружию в инвентаре до смерти - сложно)
-                -- упрощённо: ищем оружие с именем gun/pistol/revolver в workspace
-            end
-        end
-    end
     local weapon = nil
     for _, obj in ipairs(workspace:GetChildren()) do
         if obj:IsA("Tool") then
@@ -319,7 +306,7 @@ local function updateSheriffWeaponLine()
     sheriffLine = {line = line, connection = conn}
 end
 
--- ===== Аимбот с авто-стрельбой/броском =====
+-- ===== Аимбот =====
 local VirtualUser = game:GetService("VirtualUser")
 local function getAimbotTarget(weapon, isMurderer, isSheriff)
     local camera = workspace.CurrentCamera
@@ -404,12 +391,10 @@ startAimbot()
 
 -- ===== Биндинг клавиш =====
 local function updateBindings()
-    -- Обработчик нажатий клавиш
     local inputService = game:GetService("UserInputService")
     inputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if keyBindMode then
-            -- Режим ожидания новой клавиши
             if input.KeyCode ~= Enum.KeyCode.Unknown then
                 if keyBindMode == "FLING" then CONFIG.BIND_FLING = input.KeyCode
                 elseif keyBindMode == "FLYJUMP" then CONFIG.BIND_FLYJUMP = input.KeyCode
@@ -575,10 +560,303 @@ for i, color in ipairs(colors) do
     end)
 end
 
--- Статус
+-- ===== Горизонтальные вкладки (разделы) =====
+local tabContainer = Instance.new("Frame")
+tabContainer.Size = UDim2.new(1,0,0,35)
+tabContainer.Position = UDim2.new(0,0,0,105)
+tabContainer.BackgroundTransparency = 1
+tabContainer.Parent = mainFrame
+
+local tabs = {"Fling", "ESP", "Хитбокс", "FOV", "Линии", "Аимбот", "Бинды"}
+local tabButtons = {}
+local contentFrames = {}
+local currentTab = nil
+
+for i, tabName in ipairs(tabs) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.12,0,1,0)
+    btn.Position = UDim2.new(0.02 + (i-1)*0.13, 0, 0, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(40,45,60)
+    btn.Text = tabName
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.BorderSizePixel = 0
+    btn.Parent = tabContainer
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = btn
+    tabButtons[tabName] = btn
+
+    -- Контейнер для содержимого вкладки
+    local content = Instance.new("Frame")
+    content.Size = UDim2.new(0.9,0,0,0)
+    content.Position = UDim2.new(0.05,0,0,145)
+    content.BackgroundTransparency = 1
+    content.Visible = false
+    content.Parent = mainFrame
+    contentFrames[tabName] = content
+
+    btn.MouseButton1Click:Connect(function()
+        -- Скрыть все контейнеры
+        for _, frame in pairs(contentFrames) do
+            frame.Visible = false
+        end
+        -- Показать выбранный
+        content.Visible = true
+        -- Обновить внешний вид кнопок
+        for name, button in pairs(tabButtons) do
+            if name == tabName then
+                button.BackgroundColor3 = Color3.fromRGB(60,70,100)
+            else
+                button.BackgroundColor3 = Color3.fromRGB(40,45,60)
+            end
+        end
+        currentTab = tabName
+        -- Пересчитать высоту контента
+        local totalHeight = 0
+        for _, child in ipairs(content:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("TextButton") or child:IsA("TextLabel") then
+                totalHeight = totalHeight + child.Size.Y.Offset + 4
+            end
+        end
+        content.Size = UDim2.new(0.9,0,0,totalHeight)
+    end)
+end
+
+-- Автоматически открыть первую вкладку
+if #tabs > 0 then
+    tabButtons[tabs[1]].MouseButton1Click:Fire()
+end
+
+-- ===== Функции для создания элементов внутри вкладок =====
+local function createSliderInTab(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.6,0,0,22)
+    label.Position = UDim2.new(0.05,0,0,yPos)
+    label.BackgroundTransparency = 1
+    label.Text = labelText .. getter()
+    label.TextColor3 = Color3.fromRGB(200,200,220)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.Parent = parent
+
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = UDim2.new(0.8,0,0,12)
+    sliderFrame.Position = UDim2.new(0.1,0,0,yPos+25)
+    sliderFrame.BackgroundColor3 = Color3.fromRGB(50,55,70)
+    sliderFrame.BorderSizePixel = 0
+    sliderFrame.Parent = parent
+    local cornerSlider = Instance.new("UICorner")
+    cornerSlider.CornerRadius = UDim.new(0,6)
+    cornerSlider.Parent = sliderFrame
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0.5,0,1,0)
+    fill.Position = UDim2.new(0,0,0,0)
+    fill.BackgroundColor3 = Color3.fromRGB(0,180,255)
+    fill.BorderSizePixel = 0
+    fill.Parent = sliderFrame
+    local cornerFill = Instance.new("UICorner")
+    cornerFill.CornerRadius = UDim.new(0,6)
+    cornerFill.Parent = fill
+
+    local leftBtn = Instance.new("TextButton")
+    leftBtn.Size = UDim2.new(0.1,0,1.6,0)
+    leftBtn.Position = UDim2.new(-0.12,0,-0.3,0)
+    leftBtn.BackgroundColor3 = Color3.fromRGB(60,65,85)
+    leftBtn.Text = "◀"
+    leftBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    leftBtn.TextScaled = true
+    leftBtn.Font = Enum.Font.Gotham
+    leftBtn.BorderSizePixel = 0
+    leftBtn.Parent = sliderFrame
+    local cornerLeft = Instance.new("UICorner")
+    cornerLeft.CornerRadius = UDim.new(0,8)
+    cornerLeft.Parent = leftBtn
+
+    local rightBtn = Instance.new("TextButton")
+    rightBtn.Size = UDim2.new(0.1,0,1.6,0)
+    rightBtn.Position = UDim2.new(1.02,0,-0.3,0)
+    rightBtn.BackgroundColor3 = Color3.fromRGB(60,65,85)
+    rightBtn.Text = "▶"
+    rightBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    rightBtn.TextScaled = true
+    rightBtn.Font = Enum.Font.Gotham
+    rightBtn.BorderSizePixel = 0
+    rightBtn.Parent = sliderFrame
+    local cornerRight = Instance.new("UICorner")
+    cornerRight.CornerRadius = UDim.new(0,8)
+    cornerRight.Parent = rightBtn
+
+    local function update()
+        local val = getter()
+        local norm = (val - minVal) / (maxVal - minVal)
+        fill.Size = UDim2.new(math.clamp(norm,0,1),0,1,0)
+        label.Text = labelText .. val
+    end
+
+    leftBtn.MouseButton1Click:Connect(function()
+        local newVal = math.max(minVal, getter() - step)
+        setter(newVal); update()
+    end)
+    rightBtn.MouseButton1Click:Connect(function()
+        local newVal = math.min(maxVal, getter() + step)
+        setter(newVal); update()
+    end)
+    update()
+    return label
+end
+
+local function createToggleInTab(parent, labelText, yPos, getter, setter)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.8,0,0,30)
+    btn.Position = UDim2.new(0.1,0,0,yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(50,55,70)
+    btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        setter(not getter())
+        btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
+        if labelText:find("FOV") then updateFovCircle()
+        elseif labelText:find("Линии") then updateSheriffWeaponLine()
+        elseif labelText:find("Хитбокс") then updateSelfHitbox()
+        elseif labelText:find("ESP") then updateESP()
+        elseif labelText:find("Аимбот") then startAimbot()
+        elseif labelText:find("Flyjump") then
+            CONFIG.FLYJUMP_ENABLED = getter()
+            if enabled then flyjumpActive = CONFIG.FLYJUMP_ENABLED end
+        end
+    end)
+    return btn
+end
+
+local function createColorPickerInTab(parent, labelText, yPos, getter, setter)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.4,0,0,22)
+    label.Position = UDim2.new(0.05,0,0,yPos)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(200,200,220)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.Parent = parent
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.08,0,0,20)
+    btn.Position = UDim2.new(0.5,0,0,yPos+1)
+    btn.BackgroundColor3 = getter()
+    btn.Text = ""
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,5)
+    corner.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        local colors = {Color3.fromRGB(255,0,0), Color3.fromRGB(0,255,0), Color3.fromRGB(0,0,255), Color3.fromRGB(255,255,0), Color3.fromRGB(255,0,255), Color3.fromRGB(0,255,255), Color3.fromRGB(255,255,255)}
+        for i, c in ipairs(colors) do
+            if c == getter() then
+                setter(colors[i % #colors + 1])
+                break
+            end
+        end
+        btn.BackgroundColor3 = getter()
+        updateESP()
+    end)
+    return btn
+end
+
+local function createKeyBindInTab(parent, labelText, yPos, bindKey)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.4,0,0,22)
+    label.Position = UDim2.new(0.05,0,0,yPos)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(200,200,220)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.Parent = parent
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.3,0,0,25)
+    btn.Position = UDim2.new(0.5,0,0,yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
+    btn.Text = tostring(bindKey):gsub("Enum.KeyCode.", "")
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        keyBindMode = labelText:gsub(": ", "")
+        statusLabel.Text = "Нажмите клавишу для " .. labelText
+        statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
+        btn.Text = "..."
+    end)
+end
+
+-- ===== Заполнение вкладок =====
+-- Вкладка Fling
+local flingContent = contentFrames["Fling"]
+createSliderInTab(flingContent, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
+createSliderInTab(flingContent, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
+createSliderInTab(flingContent, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
+createSliderInTab(flingContent, "Скорость Fly: ", 105, 1, 50, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
+createKeyBindInTab(flingContent, "Бинд Fling: ", 140, CONFIG.BIND_FLING)
+createToggleInTab(flingContent, "Flyjump: ", 175, function() return CONFIG.FLYJUMP_ENABLED end, function(v) CONFIG.FLYJUMP_ENABLED = v end)
+
+-- Вкладка ESP
+local espContent = contentFrames["ESP"]
+createToggleInTab(espContent, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
+createColorPickerInTab(espContent, "Обычные: ", 35, function() return CONFIG.ESP_COLOR_NORMAL end, function(v) CONFIG.ESP_COLOR_NORMAL = v end)
+createColorPickerInTab(espContent, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
+createColorPickerInTab(espContent, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
+createColorPickerInTab(espContent, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
+createKeyBindInTab(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
+
+-- Вкладка Хитбокс
+local hitboxContent = contentFrames["Хитбокс"]
+createSliderInTab(hitboxContent, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
+createToggleInTab(hitboxContent, "Хитбокс: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)  -- используем ESP как триггер
+
+-- Вкладка FOV
+local fovContent = contentFrames["FOV"]
+createToggleInTab(fovContent, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
+createSliderInTab(fovContent, "Радиус круга: ", 35, 50, 300, 5, function() return CONFIG.FOV_CIRCLE_RADIUS end, function(v) CONFIG.FOV_CIRCLE_RADIUS = v end)
+createColorPickerInTab(fovContent, "Цвет круга: ", 70, function() return CONFIG.FOV_CIRCLE_COLOR end, function(v) CONFIG.FOV_CIRCLE_COLOR = v end)
+
+-- Вкладка Линии
+local sheriffContent = contentFrames["Линии"]
+createToggleInTab(sheriffContent, "Линии: ", 0, function() return CONFIG.SHERIFF_WEAPON_LINE_ENABLED end, function(v) CONFIG.SHERIFF_WEAPON_LINE_ENABLED = v end)
+createColorPickerInTab(sheriffContent, "Цвет линии: ", 35, function() return CONFIG.SHERIFF_WEAPON_LINE_COLOR end, function(v) CONFIG.SHERIFF_WEAPON_LINE_COLOR = v end)
+
+-- Вкладка Аимбот
+local aimbotContent = contentFrames["Аимбот"]
+createToggleInTab(aimbotContent, "Аимбот: ", 0, function() return CONFIG.AIMBOT_ENABLED end, function(v) CONFIG.AIMBOT_ENABLED = v end)
+createSliderInTab(aimbotContent, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
+createSliderInTab(aimbotContent, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
+createSliderInTab(aimbotContent, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
+createKeyBindInTab(aimbotContent, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
+
+-- Вкладка Бинды
+local bindContent = contentFrames["Бинды"]
+createKeyBindInTab(bindContent, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
+-- можно добавить другие бинды
+
+-- ===== Статус и кнопка включения (размещены над вкладками) =====
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1,0,0,30)
-statusLabel.Position = UDim2.new(0,0,0,105)
+statusLabel.Position = UDim2.new(0,0,0,75)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Text = "Выключено"
 statusLabel.TextColor3 = Color3.fromRGB(255,70,70)
@@ -586,10 +864,9 @@ statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.GothamSemibold
 statusLabel.Parent = mainFrame
 
--- Кнопка включения основного режима
 local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0.8,0,0,40)
-toggleBtn.Position = UDim2.new(0.1,0,0,140)
+toggleBtn.Size = UDim2.new(0.8,0,0,35)
+toggleBtn.Position = UDim2.new(0.1,0,0,110) -- чуть ниже статуса
 toggleBtn.BackgroundColor3 = Color3.fromRGB(60,70,100)
 toggleBtn.Text = "▶ Включить"
 toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -618,39 +895,10 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка Flyjump (автоматическое подкидывание)
-local flyjumpBtn = Instance.new("TextButton")
-flyjumpBtn.Size = UDim2.new(0.8,0,0,30)
-flyjumpBtn.Position = UDim2.new(0.1,0,0,185)
-flyjumpBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
-flyjumpBtn.Text = "Flyjump: Выкл"
-flyjumpBtn.TextColor3 = Color3.fromRGB(255,255,255)
-flyjumpBtn.TextScaled = true
-flyjumpBtn.Font = Enum.Font.Gotham
-flyjumpBtn.BorderSizePixel = 0
-flyjumpBtn.Parent = mainFrame
-local cornerFJ = Instance.new("UICorner")
-cornerFJ.CornerRadius = UDim.new(0,10)
-cornerFJ.Parent = flyjumpBtn
-flyjumpBtn.MouseButton1Click:Connect(function()
-    CONFIG.FLYJUMP_ENABLED = not CONFIG.FLYJUMP_ENABLED
-    flyjumpBtn.Text = "Flyjump: " .. (CONFIG.FLYJUMP_ENABLED and "Вкл" or "Выкл")
-    if enabled then
-        flyjumpActive = CONFIG.FLYJUMP_ENABLED
-        if flyjumpActive then
-            statusLabel.Text = "Flyjump активен"
-            statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
-        else
-            statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
-            statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
-        end
-    end
-end)
-
 -- Кнопка выбора цели (отдельное окно слева)
 local playerListBtn = Instance.new("TextButton")
 playerListBtn.Size = UDim2.new(0.8,0,0,30)
-playerListBtn.Position = UDim2.new(0.1,0,0,220)
+playerListBtn.Position = UDim2.new(0.1,0,0,150) -- под вкладками
 playerListBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
 playerListBtn.Text = "Выбрать цель: " .. (CONFIG.TARGET_NAME ~= "" and CONFIG.TARGET_NAME or "авто")
 playerListBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -736,262 +984,6 @@ playerListBtn.MouseButton1Click:Connect(function()
     if playerListFrame.Visible then updatePlayerListWindow() end
 end)
 
--- ===== Разделы меню (в линию, на всю ширину) =====
-local function createSection(titleText, yStart)
-    local sectionBtn = Instance.new("TextButton")
-    sectionBtn.Size = UDim2.new(0.9,0,0,30)
-    sectionBtn.Position = UDim2.new(0.05,0,0,yStart)
-    sectionBtn.BackgroundColor3 = Color3.fromRGB(40,45,60)
-    sectionBtn.Text = "▶ " .. titleText
-    sectionBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    sectionBtn.TextScaled = true
-    sectionBtn.Font = Enum.Font.GothamBold
-    sectionBtn.BorderSizePixel = 0
-    sectionBtn.Parent = mainFrame
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0,8)
-    corner.Parent = sectionBtn
-    local content = Instance.new("Frame")
-    content.Size = UDim2.new(0.9,0,0,0)
-    content.Position = UDim2.new(0.05,0,0,yStart+34)
-    content.BackgroundTransparency = 1
-    content.Visible = false
-    content.Parent = mainFrame
-    local open = false
-    sectionBtn.MouseButton1Click:Connect(function()
-        open = not open
-        content.Visible = open
-        sectionBtn.Text = (open and "▼ " or "▶ ") .. titleText
-        local totalHeight = 0
-        for _, child in ipairs(content:GetChildren()) do
-            if child:IsA("Frame") or child:IsA("TextButton") or child:IsA("TextLabel") then
-                totalHeight = totalHeight + child.Size.Y.Offset + 4
-            end
-        end
-        content.Size = UDim2.new(0.9,0,0,totalHeight)
-    end)
-    return content
-end
-
--- Создание слайдера в секции
-local function createSliderInSection(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.6,0,0,22)
-    label.Position = UDim2.new(0.05,0,0,yPos)
-    label.BackgroundTransparency = 1
-    label.Text = labelText .. getter()
-    label.TextColor3 = Color3.fromRGB(200,200,220)
-    label.TextScaled = true
-    label.Font = Enum.Font.Gotham
-    label.Parent = parent
-
-    local sliderFrame = Instance.new("Frame")
-    sliderFrame.Size = UDim2.new(0.8,0,0,12)
-    sliderFrame.Position = UDim2.new(0.1,0,0,yPos+25)
-    sliderFrame.BackgroundColor3 = Color3.fromRGB(50,55,70)
-    sliderFrame.BorderSizePixel = 0
-    sliderFrame.Parent = parent
-    local cornerSlider = Instance.new("UICorner")
-    cornerSlider.CornerRadius = UDim.new(0,6)
-    cornerSlider.Parent = sliderFrame
-
-    local fill = Instance.new("Frame")
-    fill.Size = UDim2.new(0.5,0,1,0)
-    fill.Position = UDim2.new(0,0,0,0)
-    fill.BackgroundColor3 = Color3.fromRGB(0,180,255)
-    fill.BorderSizePixel = 0
-    fill.Parent = sliderFrame
-    local cornerFill = Instance.new("UICorner")
-    cornerFill.CornerRadius = UDim.new(0,6)
-    cornerFill.Parent = fill
-
-    local leftBtn = Instance.new("TextButton")
-    leftBtn.Size = UDim2.new(0.1,0,1.6,0)
-    leftBtn.Position = UDim2.new(-0.12,0,-0.3,0)
-    leftBtn.BackgroundColor3 = Color3.fromRGB(60,65,85)
-    leftBtn.Text = "◀"
-    leftBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    leftBtn.TextScaled = true
-    leftBtn.Font = Enum.Font.Gotham
-    leftBtn.BorderSizePixel = 0
-    leftBtn.Parent = sliderFrame
-    local cornerLeft = Instance.new("UICorner")
-    cornerLeft.CornerRadius = UDim.new(0,8)
-    cornerLeft.Parent = leftBtn
-
-    local rightBtn = Instance.new("TextButton")
-    rightBtn.Size = UDim2.new(0.1,0,1.6,0)
-    rightBtn.Position = UDim2.new(1.02,0,-0.3,0)
-    rightBtn.BackgroundColor3 = Color3.fromRGB(60,65,85)
-    rightBtn.Text = "▶"
-    rightBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    rightBtn.TextScaled = true
-    rightBtn.Font = Enum.Font.Gotham
-    rightBtn.BorderSizePixel = 0
-    rightBtn.Parent = sliderFrame
-    local cornerRight = Instance.new("UICorner")
-    cornerRight.CornerRadius = UDim.new(0,8)
-    cornerRight.Parent = rightBtn
-
-    local function update()
-        local val = getter()
-        local norm = (val - minVal) / (maxVal - minVal)
-        fill.Size = UDim2.new(math.clamp(norm,0,1),0,1,0)
-        label.Text = labelText .. val
-    end
-
-    leftBtn.MouseButton1Click:Connect(function()
-        local newVal = math.max(minVal, getter() - step)
-        setter(newVal); update()
-    end)
-    rightBtn.MouseButton1Click:Connect(function()
-        local newVal = math.min(maxVal, getter() + step)
-        setter(newVal); update()
-    end)
-    update()
-    return label
-end
-
--- Создание переключателя
-local function createToggleInSection(parent, labelText, yPos, getter, setter)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.8,0,0,30)
-    btn.Position = UDim2.new(0.1,0,0,yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(50,55,70)
-    btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.TextScaled = true
-    btn.Font = Enum.Font.Gotham
-    btn.BorderSizePixel = 0
-    btn.Parent = parent
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0,8)
-    corner.Parent = btn
-    btn.MouseButton1Click:Connect(function()
-        setter(not getter())
-        btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
-        if labelText:find("FOV") then updateFovCircle()
-        elseif labelText:find("Линии") then updateSheriffWeaponLine()
-        elseif labelText:find("Хитбокс") then updateSelfHitbox()
-        elseif labelText:find("ESP") then updateESP()
-        elseif labelText:find("Аимбот") then startAimbot()
-        elseif labelText:find("Flyjump") then
-            CONFIG.FLYJUMP_ENABLED = getter()
-            if enabled then flyjumpActive = CONFIG.FLYJUMP_ENABLED end
-        end
-    end)
-    return btn
-end
-
--- Создание выбора цвета
-local function createColorPicker(parent, labelText, yPos, getter, setter)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.4,0,0,22)
-    label.Position = UDim2.new(0.05,0,0,yPos)
-    label.BackgroundTransparency = 1
-    label.Text = labelText
-    label.TextColor3 = Color3.fromRGB(200,200,220)
-    label.TextScaled = true
-    label.Font = Enum.Font.Gotham
-    label.Parent = parent
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.08,0,0,20)
-    btn.Position = UDim2.new(0.5,0,0,yPos+1)
-    btn.BackgroundColor3 = getter()
-    btn.Text = ""
-    btn.BorderSizePixel = 0
-    btn.Parent = parent
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0,5)
-    corner.Parent = btn
-    btn.MouseButton1Click:Connect(function()
-        local colors = {Color3.fromRGB(255,0,0), Color3.fromRGB(0,255,0), Color3.fromRGB(0,0,255), Color3.fromRGB(255,255,0), Color3.fromRGB(255,0,255), Color3.fromRGB(0,255,255), Color3.fromRGB(255,255,255)}
-        for i, c in ipairs(colors) do
-            if c == getter() then
-                setter(colors[i % #colors + 1])
-                break
-            end
-        end
-        btn.BackgroundColor3 = getter()
-        updateESP()
-    end)
-    return btn
-end
-
--- Создание биндинга клавиш
-local function createKeyBind(parent, labelText, yPos, bindKey)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.4,0,0,22)
-    label.Position = UDim2.new(0.05,0,0,yPos)
-    label.BackgroundTransparency = 1
-    label.Text = labelText
-    label.TextColor3 = Color3.fromRGB(200,200,220)
-    label.TextScaled = true
-    label.Font = Enum.Font.Gotham
-    label.Parent = parent
-
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.3,0,0,25)
-    btn.Position = UDim2.new(0.5,0,0,yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
-    btn.Text = tostring(bindKey):gsub("Enum.KeyCode.", "")
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.TextScaled = true
-    btn.Font = Enum.Font.Gotham
-    btn.BorderSizePixel = 0
-    btn.Parent = parent
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0,8)
-    corner.Parent = btn
-    btn.MouseButton1Click:Connect(function()
-        keyBindMode = labelText:gsub(": ", "")
-        statusLabel.Text = "Нажмите клавишу для " .. labelText
-        statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
-        btn.Text = "..."
-    end)
-end
-
--- ===== Создание разделов =====
-local flingSection = createSection("Fling", 260)
-createSliderInSection(flingSection, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
-createSliderInSection(flingSection, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
-createSliderInSection(flingSection, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
-createSliderInSection(flingSection, "Скорость Fly: ", 105, 1, 50, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
-createKeyBind(flingSection, "Бинд Fling: ", 140, CONFIG.BIND_FLING)
-
-local espSection = createSection("ESP", 260+180)
-createToggleInSection(espSection, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
-createColorPicker(espSection, "Обычные: ", 35, function() return CONFIG.ESP_COLOR_NORMAL end, function(v) CONFIG.ESP_COLOR_NORMAL = v end)
-createColorPicker(espSection, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
-createColorPicker(espSection, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
-createColorPicker(espSection, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
-createKeyBind(espSection, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
-
-local hitboxSection = createSection("Хитбокс себя", 260+180+190)
-createSliderInSection(hitboxSection, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
-createToggleInSection(hitboxSection, "Хитбокс: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end) -- используем ESP как триггер, но лучше отдельный переключатель
-
-local fovSection = createSection("FOV Круг", 260+180+190+90)
-createToggleInSection(fovSection, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
-createSliderInSection(fovSection, "Радиус круга: ", 35, 50, 300, 5, function() return CONFIG.FOV_CIRCLE_RADIUS end, function(v) CONFIG.FOV_CIRCLE_RADIUS = v end)
-createColorPicker(fovSection, "Цвет круга: ", 70, function() return CONFIG.FOV_CIRCLE_COLOR end, function(v) CONFIG.FOV_CIRCLE_COLOR = v end)
-
-local sheriffSection = createSection("Линии к оружию шерифа", 260+180+190+90+120)
-createToggleInSection(sheriffSection, "Линии: ", 0, function() return CONFIG.SHERIFF_WEAPON_LINE_ENABLED end, function(v) CONFIG.SHERIFF_WEAPON_LINE_ENABLED = v end)
-createColorPicker(sheriffSection, "Цвет линии: ", 35, function() return CONFIG.SHERIFF_WEAPON_LINE_COLOR end, function(v) CONFIG.SHERIFF_WEAPON_LINE_COLOR = v end)
-
-local aimbotSection = createSection("Аимбот", 260+180+190+90+120+90)
-createToggleInSection(aimbotSection, "Аимбот: ", 0, function() return CONFIG.AIMBOT_ENABLED end, function(v) CONFIG.AIMBOT_ENABLED = v end)
-createSliderInSection(aimbotSection, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
-createSliderInSection(aimbotSection, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
-createSliderInSection(aimbotSection, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
-createKeyBind(aimbotSection, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
-
--- Также добавим бинд для Flyjump в отдельный раздел (или в Fling, но добавим отдельно)
-local bindSection = createSection("Бинды", 260+180+190+90+120+90+180)
-createKeyBind(bindSection, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
-
 -- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
@@ -1009,7 +1001,6 @@ game:GetService("UserInputService").InputBegan:Connect(function(input, gameProce
             updateESP()
             updateFovCircle()
             updateSheriffWeaponLine()
-            -- Обновляем отображение кнопок биндов
         end
     end
 end)
