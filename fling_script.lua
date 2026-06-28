@@ -1,15 +1,10 @@
--- Fling Controller v17.0 (исправлены все ошибки)
+-- Fling Controller v20.0 (горизонтальные вкладки, все функции)
 local Player = game.Players.LocalPlayer
-local function getCharacter()
-    return Player.Character or Player.CharacterAdded:Wait()
-end
-
-local Character = getCharacter()
+local Character = Player.Character or Player.CharacterAdded:Wait()
 local RootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 wait(0.5)
 
--- Конфигурация
 local CONFIG = {
     FLING_POWER = 63,
     FOLLOW_DISTANCE = 2.5,
@@ -45,33 +40,19 @@ local bv, gyro = nil, nil
 local lastFling = 0
 local heartbeatConnection = nil
 local menuOpen = false
-local espBoxes, roleBoxes = {}, {}
+local espBoxes = {}
 local selfHitbox = nil
 local aimbotConnections = {}
 local fovCircle = nil
 local sheriffLine = nil
 local keyBindMode = nil
 
--- ===== Переподключение персонажа =====
-local function refreshCharacter()
-    Character = getCharacter()
-    RootPart = Character:WaitForChild("HumanoidRootPart")
-    Humanoid = Character:WaitForChild("Humanoid")
-    if enabled and TARGET then flyUnder(TARGET) end
-    startAimbot()
-    updateSelfHitbox()
-    updateFovCircle()
-    updateSheriffWeaponLine()
-end
-Player.CharacterAdded:Connect(refreshCharacter)
-
 -- ===== Основные функции =====
-local function getTargetByName(name)
-    if name and name ~= "" then return game.Players:FindFirstChild(name) end
-    return nil
-end
-
-local function getClosestPlayer()
+local function getTarget()
+    if CONFIG.TARGET_NAME and CONFIG.TARGET_NAME ~= "" then
+        local plr = game.Players:FindFirstChild(CONFIG.TARGET_NAME)
+        if plr then return plr end
+    end
     local nearest, dist = nil, math.huge
     for _, plr in ipairs(game.Players:GetPlayers()) do
         if plr ~= Player then
@@ -83,12 +64,6 @@ local function getClosestPlayer()
         end
     end
     return nearest
-end
-
-local function getTarget()
-    local byName = getTargetByName(CONFIG.TARGET_NAME)
-    if byName then return byName end
-    return getClosestPlayer()
 end
 
 local function flingTarget(target)
@@ -138,14 +113,12 @@ local function flyUnder(target)
         local underPos = targetPos - Vector3.new(0, CONFIG.FOLLOW_DISTANCE, 0)
         local direction = (underPos - RootPart.Position)
         if direction.Magnitude > 5 then
-            RootPart.CFrame = CFrame.new(underPos) -- телепорт, если далеко
+            RootPart.CFrame = CFrame.new(underPos)
         else
             bv.Velocity = direction * CONFIG.FLY_SPEED
         end
-        -- Лежачее положение
         local rot = CFrame.Angles(math.rad(90), 0, 0)
         RootPart.CFrame = CFrame.new(RootPart.Position) * rot
-        -- Flyjump
         if flyjumpActive then
             if tick() - lastFling > CONFIG.FLING_INTERVAL then
                 flingTarget(target)
@@ -172,29 +145,10 @@ end
 
 -- ===== ESP =====
 local function clearESP()
-    for plr, box in pairs(espBoxes) do if box and box.Parent then box:Destroy() end end
+    for _, box in pairs(espBoxes) do
+        if box and box.Parent then box:Destroy() end
+    end
     espBoxes = {}
-    for plr, box in pairs(roleBoxes) do if box and box.Parent then box:Destroy() end end
-    roleBoxes = {}
-end
-
-local function createBox(player, color, name)
-    if not player or not player.Character then return nil end
-    local char = player.Character
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    local old = char:FindFirstChild(name)
-    if old then old:Destroy() end
-    local box = Instance.new("BoxHandleAdornment")
-    box.Name = name
-    box.Size = Vector3.new(3,4,1.5)
-    box.Adornee = hrp
-    box.Color3 = color
-    box.Transparency = 0.3
-    box.ZIndex = 0
-    box.AlwaysOnTop = true
-    box.Parent = char
-    return box
 end
 
 local function updateESP()
@@ -208,8 +162,11 @@ local function updateESP()
                 local tool = char:FindFirstChildWhichIsA("Tool")
                 if tool then
                     local name = tool.Name:lower()
-                    if name:find("knife") or name:find("dagger") or name:find("blade") then murderer = plr
-                    elseif name:find("gun") or name:find("pistol") or name:find("revolver") then sheriff = plr end
+                    if name:find("knife") or name:find("dagger") or name:find("blade") then
+                        murderer = plr
+                    elseif name:find("gun") or name:find("pistol") or name:find("revolver") then
+                        sheriff = plr
+                    end
                 end
             end
         end
@@ -219,8 +176,17 @@ local function updateESP()
             local color = CONFIG.ESP_COLOR_NORMAL
             if plr == murderer then color = CONFIG.ESP_COLOR_MURDERER
             elseif plr == sheriff then color = CONFIG.ESP_COLOR_SHERIFF end
-            local box = createBox(plr, color, "ESPBox")
-            if box then espBoxes[plr] = box end
+            local char = plr.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local box = Instance.new("BoxHandleAdornment")
+                box.Size = Vector3.new(3,4,1.5)
+                box.Adornee = char.HumanoidRootPart
+                box.Color3 = color
+                box.Transparency = 0.3
+                box.AlwaysOnTop = true
+                box.Parent = char
+                espBoxes[plr] = box
+            end
         end
     end
     updateSelfHitbox()
@@ -436,8 +402,8 @@ screenGui.Parent = Player.PlayerGui
 screenGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 520, 0, 600)
-mainFrame.Position = UDim2.new(0.5, -260, 0.5, -300)
+mainFrame.Size = UDim2.new(0, 520, 0, 620)
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -310)
 mainFrame.BackgroundColor3 = Color3.fromRGB(20,22,30)
 mainFrame.BackgroundTransparency = 0.1
 mainFrame.BorderSizePixel = 0
@@ -449,7 +415,6 @@ local cornerMain = Instance.new("UICorner")
 cornerMain.CornerRadius = UDim.new(0, 25)
 cornerMain.Parent = mainFrame
 
--- Градиентный фон
 local bgGradient = Instance.new("UIGradient")
 bgGradient.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(60,0,100)),
@@ -466,7 +431,6 @@ game:GetService("RunService").Heartbeat:Connect(function()
     bgGradient.Rotation = gradAngle % 360
 end)
 
--- Тень
 local shadow = Instance.new("ImageLabel")
 shadow.Size = UDim2.new(1, 30, 1, 30)
 shadow.Position = UDim2.new(0, -15, 0, -15)
@@ -477,7 +441,6 @@ shadow.ImageTransparency = 0.5
 shadow.ZIndex = 0
 shadow.Parent = mainFrame
 
--- Заголовок
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1,0,0,55)
 header.Position = UDim2.new(0,0,0,0)
@@ -649,7 +612,7 @@ local cornerPL = Instance.new("UICorner")
 cornerPL.CornerRadius = UDim.new(0,10)
 cornerPL.Parent = playerListBtn
 
--- Окно списка игроков
+-- Окно списка игроков (слева)
 local playerListFrame = Instance.new("Frame")
 playerListFrame.Size = UDim2.new(0, 200, 0, 300)
 playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
@@ -723,7 +686,7 @@ playerListBtn.MouseButton1Click:Connect(function()
     if playerListFrame.Visible then updatePlayerListWindow() end
 end)
 
--- ===== Горизонтальные вкладки =====
+-- ===== Горизонтальные вкладки (как цвета) =====
 local tabContainer = Instance.new("Frame")
 tabContainer.Size = UDim2.new(1,0,0,30)
 tabContainer.Position = UDim2.new(0,0,0,245)
@@ -733,7 +696,6 @@ tabContainer.Parent = mainFrame
 local tabs = {"Fling", "ESP", "Хитбокс", "FOV", "Линии", "Аимбот", "Бинды"}
 local tabButtons = {}
 local contentFrames = {}
-local currentTab = nil
 
 for i, tabName in ipairs(tabs) do
     local btn = Instance.new("TextButton")
@@ -771,17 +733,14 @@ for i, tabName in ipairs(tabs) do
                 button.BackgroundColor3 = Color3.fromRGB(40,45,60)
             end
         end
-        currentTab = tabName
     end)
 end
 
 -- Открыть первую вкладку
-if #tabs > 0 then
-    tabButtons[tabs[1]].MouseButton1Click:Fire()
-end
+tabButtons[tabs[1]].MouseButton1Click:Fire()
 
 -- ===== Функции создания элементов внутри вкладок =====
-local function createSliderInTab(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
+local function createSlider(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6,0,0,22)
     label.Position = UDim2.new(0.05,0,0,yPos)
@@ -849,16 +808,18 @@ local function createSliderInTab(parent, labelText, yPos, minVal, maxVal, step, 
 
     leftBtn.MouseButton1Click:Connect(function()
         local newVal = math.max(minVal, getter() - step)
-        setter(newVal); update()
+        setter(newVal)
+        update()
     end)
     rightBtn.MouseButton1Click:Connect(function()
         local newVal = math.min(maxVal, getter() + step)
-        setter(newVal); update()
+        setter(newVal)
+        update()
     end)
     update()
 end
 
-local function createToggleInTab(parent, labelText, yPos, getter, setter)
+local function createToggle(parent, labelText, yPos, getter, setter)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.8,0,0,30)
     btn.Position = UDim2.new(0.1,0,0,yPos)
@@ -879,12 +840,13 @@ local function createToggleInTab(parent, labelText, yPos, getter, setter)
         elseif labelText:find("Линии") then updateSheriffWeaponLine()
         elseif labelText:find("ESP") then updateESP()
         elseif labelText:find("Аимбот") then startAimbot()
+        elseif labelText:find("Хитбокс") then updateSelfHitbox()
         end
     end)
     return btn
 end
 
-local function createColorPickerInTab(parent, labelText, yPos, getter, setter)
+local function createColorPicker(parent, labelText, yPos, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.4,0,0,22)
     label.Position = UDim2.new(0.05,0,0,yPos)
@@ -916,10 +878,9 @@ local function createColorPickerInTab(parent, labelText, yPos, getter, setter)
         btn.BackgroundColor3 = getter()
         updateESP()
     end)
-    return btn
 end
 
-local function createKeyBindInTab(parent, labelText, yPos, bindKey)
+local function createKeyBind(parent, labelText, yPos, bindKey)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.4,0,0,22)
     label.Position = UDim2.new(0.05,0,0,yPos)
@@ -949,49 +910,46 @@ local function createKeyBindInTab(parent, labelText, yPos, bindKey)
         statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
         btn.Text = "..."
     end)
-    return btn
 end
 
 -- ===== Заполнение вкладок =====
 local flingContent = contentFrames["Fling"]
-createSliderInTab(flingContent, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
-createSliderInTab(flingContent, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
-createSliderInTab(flingContent, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
-createSliderInTab(flingContent, "Скорость Fly: ", 105, 1, 50, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
-createKeyBindInTab(flingContent, "Бинд Fling: ", 140, CONFIG.BIND_FLING)
+createSlider(flingContent, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
+createSlider(flingContent, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
+createSlider(flingContent, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
+createSlider(flingContent, "Скорость Fly: ", 105, 1, 50, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
+createKeyBind(flingContent, "Бинд Fling: ", 140, CONFIG.BIND_FLING)
 
 local espContent = contentFrames["ESP"]
-createToggleInTab(espContent, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
-createColorPickerInTab(espContent, "Обычные: ", 35, function() return CONFIG.ESP_COLOR_NORMAL end, function(v) CONFIG.ESP_COLOR_NORMAL = v end)
-createColorPickerInTab(espContent, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
-createColorPickerInTab(espContent, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
-createColorPickerInTab(espContent, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
-createKeyBindInTab(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
+createToggle(espContent, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
+createColorPicker(espContent, "Обычные: ", 35, function() return CONFIG.ESP_COLOR_NORMAL end, function(v) CONFIG.ESP_COLOR_NORMAL = v end)
+createColorPicker(espContent, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
+createColorPicker(espContent, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
+createColorPicker(espContent, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
+createKeyBind(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
 
 local hitboxContent = contentFrames["Хитбокс"]
-createSliderInTab(hitboxContent, "Размер хитбокса: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) 
-    CONFIG.SELF_HITBOX_SIZE = v
-    updateSelfHitbox()
-end)
+createSlider(hitboxContent, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v; updateSelfHitbox() end)
+createToggle(hitboxContent, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v) -- привязано к ESP
 
 local fovContent = contentFrames["FOV"]
-createToggleInTab(fovContent, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
-createSliderInTab(fovContent, "Радиус круга: ", 35, 50, 300, 5, function() return CONFIG.FOV_CIRCLE_RADIUS end, function(v) CONFIG.FOV_CIRCLE_RADIUS = v end)
-createColorPickerInTab(fovContent, "Цвет круга: ", 70, function() return CONFIG.FOV_CIRCLE_COLOR end, function(v) CONFIG.FOV_CIRCLE_COLOR = v end)
+createToggle(fovContent, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
+createSlider(fovContent, "Радиус: ", 35, 50, 300, 5, function() return CONFIG.FOV_CIRCLE_RADIUS end, function(v) CONFIG.FOV_CIRCLE_RADIUS = v end)
+createColorPicker(fovContent, "Цвет круга: ", 70, function() return CONFIG.FOV_CIRCLE_COLOR end, function(v) CONFIG.FOV_CIRCLE_COLOR = v end)
 
 local sheriffContent = contentFrames["Линии"]
-createToggleInTab(sheriffContent, "Линии: ", 0, function() return CONFIG.SHERIFF_WEAPON_LINE_ENABLED end, function(v) CONFIG.SHERIFF_WEAPON_LINE_ENABLED = v end)
-createColorPickerInTab(sheriffContent, "Цвет линии: ", 35, function() return CONFIG.SHERIFF_WEAPON_LINE_COLOR end, function(v) CONFIG.SHERIFF_WEAPON_LINE_COLOR = v end)
+createToggle(sheriffContent, "Линии: ", 0, function() return CONFIG.SHERIFF_WEAPON_LINE_ENABLED end, function(v) CONFIG.SHERIFF_WEAPON_LINE_ENABLED = v end)
+createColorPicker(sheriffContent, "Цвет линии: ", 35, function() return CONFIG.SHERIFF_WEAPON_LINE_COLOR end, function(v) CONFIG.SHERIFF_WEAPON_LINE_COLOR = v end)
 
 local aimbotContent = contentFrames["Аимбот"]
-createToggleInTab(aimbotContent, "Аимбот: ", 0, function() return CONFIG.AIMBOT_ENABLED end, function(v) CONFIG.AIMBOT_ENABLED = v end)
-createSliderInTab(aimbotContent, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
-createSliderInTab(aimbotContent, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
-createSliderInTab(aimbotContent, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
-createKeyBindInTab(aimbotContent, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
+createToggle(aimbotContent, "Аимбот: ", 0, function() return CONFIG.AIMBOT_ENABLED end, function(v) CONFIG.AIMBOT_ENABLED = v end)
+createSlider(aimbotContent, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
+createSlider(aimbotContent, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
+createSlider(aimbotContent, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
+createKeyBind(aimbotContent, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
 
 local bindContent = contentFrames["Бинды"]
-createKeyBindInTab(bindContent, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
+createKeyBind(bindContent, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
 
 -- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
