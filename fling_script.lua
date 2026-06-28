@@ -4,17 +4,19 @@ local Character = Player.Character or Player.CharacterAdded:Wait()
 local RootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 
--- Настройки
-local FLING_POWER = 150        -- сила подкидывания
-local FOLLOW_DISTANCE = 3      -- расстояние под игроком
-local FLY_SPEED = 5            -- скорость полёта
-local FLING_INTERVAL = 0.5     -- интервал между подкидываниями (сек)
-local KEY_TOGGLE = Enum.KeyCode.F  -- клавиша для включения/выключения
+-- НАСТРОЙКИ (меняй под себя)
+local FLING_POWER = 150        -- Сила подкидывания (чем больше, тем выше)
+local FOLLOW_DISTANCE = 3      -- Расстояние под игроком
+local FLY_SPEED = 5            -- Скорость полёта
+local FLING_INTERVAL = 0.5     -- Как часто подкидывать (в секундах)
+local KEY_TOGGLE = Enum.KeyCode.F  -- Клавиша включения/выключения
 
+-- Переменные состояния
 local TARGET = nil
 local enabled = false
 local bv = nil
 local lastFling = 0
+local heartbeatConnection = nil
 
 -- Функция для поиска ближайшего игрока
 local function getTarget(name)
@@ -49,6 +51,23 @@ local function flingTarget(target)
     root.Velocity = Vector3.new(0, FLING_POWER, 0)
 end
 
+-- Функция остановки полёта
+local function stopFlying()
+    enabled = false
+    if bv then
+        bv:Destroy()
+        bv = nil
+    end
+    if heartbeatConnection then
+        heartbeatConnection:Disconnect()
+        heartbeatConnection = nil
+    end
+    Humanoid.PlatformStand = false
+    Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+    print("❌ Скрипт остановлен")
+end
+
 -- Основная функция полёта под целью
 local function flyUnder(target)
     if not target then return end
@@ -56,6 +75,9 @@ local function flyUnder(target)
     if not targetChar then return end
     local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
     if not targetRoot then return end
+
+    -- Останавливаем предыдущий полёт, если был
+    stopFlying()
 
     -- Создаём BodyVelocity
     bv = Instance.new("BodyVelocity")
@@ -68,14 +90,17 @@ local function flyUnder(target)
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
     Humanoid.PlatformStand = true
 
+    enabled = true
+    lastFling = 0
+
     -- Цикл обновления
-    game:GetService("RunService").Heartbeat:Connect(function()
+    heartbeatConnection = game:GetService("RunService").Heartbeat:Connect(function()
+        if not enabled then return end
+
+        -- Проверяем, существует ли цель
         if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
-            if bv then bv:Destroy() end
-            Humanoid.PlatformStand = false
-            Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-            Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-            enabled = false
+            print("⚠️ Цель исчезла, останавливаем...")
+            stopFlying()
             return
         end
 
@@ -84,42 +109,46 @@ local function flyUnder(target)
         local currentPos = RootPart.Position
         local direction = (underPos - currentPos)
 
+        -- Движение к цели
         if direction.Magnitude > 10 then
             RootPart.CFrame = CFrame.new(underPos)
         else
             bv.Velocity = direction * FLY_SPEED
         end
 
-        -- Подкидываем цель
+        -- Подкидываем цель с интервалом
         if tick() - lastFling > FLING_INTERVAL then
             flingTarget(target)
             lastFling = tick()
         end
     end)
+
+    print("✅ Теперь вы летаете под игроком " .. target.Name .. " и подкидываете его!")
 end
 
--- Включение/выключение по клавише
+-- Обработка нажатия клавиши F (включение/выключение)
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == KEY_TOGGLE then
-        enabled = not enabled
         if enabled then
+            -- Если включено - выключаем
+            stopFlying()
+            print("🔴 Скрипт выключен")
+        else
+            -- Если выключено - ищем цель и включаем
             TARGET = getTarget(nil)
             if TARGET then
                 flyUnder(TARGET)
             else
-                print("Нет игроков поблизости!")
-                enabled = false
+                print("⚠️ Нет игроков поблизости!")
             end
-        else
-            -- Выключаем
-            if bv then bv:Destroy() end
-            Humanoid.PlatformStand = false
-            Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-            Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-            print("Выключено")
         end
     end
 end)
 
-print("Скрипт загружен! Нажмите F, чтобы включить/выключить.")
+-- Очистка при выходе из игры
+Player.CharacterAdded:Connect(function()
+    stopFlying()
+end)
+
+print("🟢 Скрипт загружен! Нажмите F, чтобы включить/выключить.")
