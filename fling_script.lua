@@ -1,4 +1,3 @@
--- Fling Controller v20.0 (горизонтальные вкладки, все функции)
 local Player = game.Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local RootPart = Character:WaitForChild("HumanoidRootPart")
@@ -47,7 +46,6 @@ local fovCircle = nil
 local sheriffLine = nil
 local keyBindMode = nil
 
--- ===== Основные функции =====
 local function getTarget()
     if CONFIG.TARGET_NAME and CONFIG.TARGET_NAME ~= "" then
         local plr = game.Players:FindFirstChild(CONFIG.TARGET_NAME)
@@ -128,7 +126,6 @@ local function flyUnder(target)
     end)
 end
 
--- ===== Хитбокс себя =====
 local function updateSelfHitbox()
     if selfHitbox then selfHitbox:Destroy(); selfHitbox = nil end
     if not RootPart then return end
@@ -143,7 +140,6 @@ local function updateSelfHitbox()
     selfHitbox.Parent = RootPart
 end
 
--- ===== ESP =====
 local function clearESP()
     for _, box in pairs(espBoxes) do
         if box and box.Parent then box:Destroy() end
@@ -194,7 +190,6 @@ end
 game.Players.PlayerAdded:Connect(updateESP)
 game.Players.PlayerRemoving:Connect(updateESP)
 
--- ===== FOV круг =====
 local function updateFovCircle()
     if fovCircle then fovCircle:Destroy(); fovCircle = nil end
     if not CONFIG.FOV_CIRCLE_ENABLED then return end
@@ -225,7 +220,6 @@ local function updateFovCircle()
     corner2.Parent = inner
 end
 
--- ===== Линии к оружию шерифа =====
 local function updateSheriffWeaponLine()
     if sheriffLine then
         if sheriffLine.line then sheriffLine.line:Destroy() end
@@ -274,7 +268,6 @@ local function updateSheriffWeaponLine()
     sheriffLine = {line = line, connection = conn}
 end
 
--- ===== Аимбот =====
 local VirtualUser = game:GetService("VirtualUser")
 local function getAimbotTarget(weapon, isMurderer, isSheriff)
     local camera = workspace.CurrentCamera
@@ -357,7 +350,6 @@ local function startAimbot()
 end
 startAimbot()
 
--- ===== Биндинг клавиш =====
 local function updateBindings()
     local inputService = game:GetService("UserInputService")
     inputService.InputBegan:Connect(function(input, gameProcessed)
@@ -395,15 +387,14 @@ local function updateBindings()
 end
 updateBindings()
 
--- ===== GUI =====
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlingMenu"
 screenGui.Parent = Player.PlayerGui
 screenGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 520, 0, 620)
-mainFrame.Position = UDim2.new(0.5, -260, 0.5, -310)
+mainFrame.Size = UDim2.new(0, 520, 0, 600)
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -300)
 mainFrame.BackgroundColor3 = Color3.fromRGB(20,22,30)
 mainFrame.BackgroundTransparency = 0.1
 mainFrame.BorderSizePixel = 0
@@ -489,10 +480,8 @@ closeScriptBtn.MouseButton1Click:Connect(function()
     if fovCircle then fovCircle:Destroy() end
     if sheriffLine then sheriffLine.line:Destroy(); sheriffLine.connection:Disconnect() end
     screenGui:Destroy()
-    print("Скрипт остановлен.")
 end)
 
--- Палитра цветов фона
 local paletteFrame = Instance.new("Frame")
 paletteFrame.Size = UDim2.new(1,0,0,30)
 paletteFrame.Position = UDim2.new(0,0,0,60)
@@ -525,7 +514,6 @@ for i, color in ipairs(colors) do
     end)
 end
 
--- Статус
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(1,0,0,30)
 statusLabel.Position = UDim2.new(0,0,0,95)
@@ -536,7 +524,6 @@ statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.GothamSemibold
 statusLabel.Parent = mainFrame
 
--- Кнопка включения
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0.8,0,0,35)
 toggleBtn.Position = UDim2.new(0.1,0,0,130)
@@ -568,7 +555,6 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка Flyjump
 local flyjumpBtn = Instance.new("TextButton")
 flyjumpBtn.Size = UDim2.new(0.8,0,0,30)
 flyjumpBtn.Position = UDim2.new(0.1,0,0,170)
@@ -597,7 +583,6 @@ flyjumpBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка выбора цели
 local playerListBtn = Instance.new("TextButton")
 playerListBtn.Size = UDim2.new(0.8,0,0,30)
 playerListBtn.Position = UDim2.new(0.1,0,0,205)
@@ -612,7 +597,6 @@ local cornerPL = Instance.new("UICorner")
 cornerPL.CornerRadius = UDim.new(0,10)
 cornerPL.Parent = playerListBtn
 
--- Окно списка игроков (слева)
 local playerListFrame = Instance.new("Frame")
 playerListFrame.Size = UDim2.new(0, 200, 0, 300)
 playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
@@ -686,10 +670,9 @@ playerListBtn.MouseButton1Click:Connect(function()
     if playerListFrame.Visible then updatePlayerListWindow() end
 end)
 
--- ===== Горизонтальные вкладки (как цвета) =====
 local tabContainer = Instance.new("Frame")
-tabContainer.Size = UDim2.new(1,0,0,30)
-tabContainer.Position = UDim2.new(0,0,0,245)
+tabContainer.Size = UDim2.new(1, 0, 0, 26)
+tabContainer.Position = UDim2.new(0, 0, 0, 245)
 tabContainer.BackgroundTransparency = 1
 tabContainer.Parent = mainFrame
 
@@ -697,10 +680,14 @@ local tabs = {"Fling", "ESP", "Хитбокс", "FOV", "Линии", "Аимбо
 local tabButtons = {}
 local contentFrames = {}
 
+local tabWidth = 0.12
+local startX = 0.025
+local gap = 0.008
+
 for i, tabName in ipairs(tabs) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.12,0,1,0)
-    btn.Position = UDim2.new(0.02 + (i-1)*0.13, 0, 0, 0)
+    btn.Size = UDim2.new(tabWidth, 0, 1, -2)
+    btn.Position = UDim2.new(startX + (i-1)*(tabWidth + gap), 0, 0, 1)
     btn.BackgroundColor3 = Color3.fromRGB(40,45,60)
     btn.Text = tabName
     btn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -709,13 +696,13 @@ for i, tabName in ipairs(tabs) do
     btn.BorderSizePixel = 0
     btn.Parent = tabContainer
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0,8)
+    corner.CornerRadius = UDim.new(0,6)
     corner.Parent = btn
     tabButtons[tabName] = btn
 
     local content = Instance.new("Frame")
     content.Size = UDim2.new(0.9,0,0,0)
-    content.Position = UDim2.new(0.05,0,0,280)
+    content.Position = UDim2.new(0.05,0,0,278)
     content.BackgroundTransparency = 1
     content.Visible = false
     content.Parent = mainFrame
@@ -736,10 +723,8 @@ for i, tabName in ipairs(tabs) do
     end)
 end
 
--- Открыть первую вкладку
 tabButtons[tabs[1]].MouseButton1Click:Fire()
 
--- ===== Функции создания элементов внутри вкладок =====
 local function createSlider(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6,0,0,22)
@@ -912,7 +897,6 @@ local function createKeyBind(parent, labelText, yPos, bindKey)
     end)
 end
 
--- ===== Заполнение вкладок =====
 local flingContent = contentFrames["Fling"]
 createSlider(flingContent, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
 createSlider(flingContent, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
@@ -930,7 +914,7 @@ createKeyBind(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
 
 local hitboxContent = contentFrames["Хитбокс"]
 createSlider(hitboxContent, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v; updateSelfHitbox() end)
-createToggle(hitboxContent, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v) -- привязано к ESP
+createToggle(hitboxContent, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v)
 
 local fovContent = contentFrames["FOV"]
 createToggle(fovContent, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
@@ -951,7 +935,6 @@ createKeyBind(aimbotContent, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
 local bindContent = contentFrames["Бинды"]
 createKeyBind(bindContent, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
 
--- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
@@ -971,5 +954,3 @@ game:GetService("UserInputService").InputBegan:Connect(function(input, gameProce
         end
     end
 end)
-
-print("✅ Скрипт загружен. Нажмите ПРАВЫЙ SHIFT для открытия меню.")
