@@ -1,4 +1,4 @@
--- Fling Controller v16.0 (полная версия, открывается по правому Shift)
+-- Fling Controller v17.0 (исправлены все ошибки)
 local Player = game.Players.LocalPlayer
 local function getCharacter()
     return Player.Character or Player.CharacterAdded:Wait()
@@ -52,7 +52,7 @@ local fovCircle = nil
 local sheriffLine = nil
 local keyBindMode = nil
 
--- ===== Переподключение при смене персонажа =====
+-- ===== Переподключение персонажа =====
 local function refreshCharacter()
     Character = getCharacter()
     RootPart = Character:WaitForChild("HumanoidRootPart")
@@ -138,12 +138,14 @@ local function flyUnder(target)
         local underPos = targetPos - Vector3.new(0, CONFIG.FOLLOW_DISTANCE, 0)
         local direction = (underPos - RootPart.Position)
         if direction.Magnitude > 5 then
-            RootPart.CFrame = CFrame.new(underPos)  -- телепорт при большом расстоянии
+            RootPart.CFrame = CFrame.new(underPos) -- телепорт, если далеко
         else
             bv.Velocity = direction * CONFIG.FLY_SPEED
         end
+        -- Лежачее положение
         local rot = CFrame.Angles(math.rad(90), 0, 0)
         RootPart.CFrame = CFrame.new(RootPart.Position) * rot
+        -- Flyjump
         if flyjumpActive then
             if tick() - lastFling > CONFIG.FLING_INTERVAL then
                 flingTarget(target)
@@ -632,7 +634,7 @@ flyjumpBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Кнопка выбора цели (отдельное окно слева)
+-- Кнопка выбора цели
 local playerListBtn = Instance.new("TextButton")
 playerListBtn.Size = UDim2.new(0.8,0,0,30)
 playerListBtn.Position = UDim2.new(0.1,0,0,205)
@@ -647,7 +649,7 @@ local cornerPL = Instance.new("UICorner")
 cornerPL.CornerRadius = UDim.new(0,10)
 cornerPL.Parent = playerListBtn
 
--- Окно списка игроков (слева, перетаскиваемое)
+-- Окно списка игроков
 local playerListFrame = Instance.new("Frame")
 playerListFrame.Size = UDim2.new(0, 200, 0, 300)
 playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
@@ -854,7 +856,6 @@ local function createSliderInTab(parent, labelText, yPos, minVal, maxVal, step, 
         setter(newVal); update()
     end)
     update()
-    return label
 end
 
 local function createToggleInTab(parent, labelText, yPos, getter, setter)
@@ -948,6 +949,7 @@ local function createKeyBindInTab(parent, labelText, yPos, bindKey)
         statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
         btn.Text = "..."
     end)
+    return btn
 end
 
 -- ===== Заполнение вкладок =====
@@ -967,9 +969,8 @@ createColorPickerInTab(espContent, "Свой: ", 125, function() return CONFIG.E
 createKeyBindInTab(espContent, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
 
 local hitboxContent = contentFrames["Хитбокс"]
-createSliderInTab(hitboxContent, "Размер хитбокса: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
--- При изменении размера обновляем хитбокс
-hitboxContent.ChildAdded:Connect(function()
+createSliderInTab(hitboxContent, "Размер хитбокса: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) 
+    CONFIG.SELF_HITBOX_SIZE = v
     updateSelfHitbox()
 end)
 
@@ -1013,4 +1014,4 @@ game:GetService("UserInputService").InputBegan:Connect(function(input, gameProce
     end
 end)
 
-print("✅ Скрипт полностью загружен. Нажмите ПРАВЫЙ SHIFT для открытия меню.")
+print("✅ Скрипт загружен. Нажмите ПРАВЫЙ SHIFT для открытия меню.")
