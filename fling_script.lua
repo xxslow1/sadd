@@ -1,14 +1,20 @@
--- Fling Controller v8.0
+-- Fling Controller v11.0
+-- Работает во всех режимах MM2: лобби, игра, после смерти, при смене персонажа
 local Player = game.Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
+local function getCharacter()
+    return Player.Character or Player.CharacterAdded:Wait()
+end
+
+local Character = getCharacter()
 local RootPart = Character:WaitForChild("HumanoidRootPart")
 local Humanoid = Character:WaitForChild("Humanoid")
 wait(0.5)
 
+-- Конфигурация
 local CONFIG = {
-    FLING_POWER = 200,
+    FLING_POWER = 63,          -- ровно 10 блоков вверх
     FOLLOW_DISTANCE = 3,
-    FLY_SPEED = 8,
+    FLY_SPEED = 25,
     FLING_INTERVAL = 0.5,
     TARGET_NAME = "",
     ESP_ENABLED = false,
@@ -23,10 +29,14 @@ local CONFIG = {
     SHERIFF_RADIUS = 100,
     FLYJUMP_ENABLED = false,
     FOV_CIRCLE_ENABLED = true,
-    FOV_CIRCLE_RADIUS = 150,  -- размер круга на экране
+    FOV_CIRCLE_RADIUS = 150,
     FOV_CIRCLE_COLOR = Color3.fromRGB(0,200,255),
     SHERIFF_WEAPON_LINE_ENABLED = true,
     SHERIFF_WEAPON_LINE_COLOR = Color3.fromRGB(255,200,0),
+    BIND_FLING = Enum.KeyCode.F,
+    BIND_FLYJUMP = Enum.KeyCode.G,
+    BIND_AIMBOT = Enum.KeyCode.H,
+    BIND_ESP = Enum.KeyCode.Z,
 }
 
 local TARGET = nil
@@ -41,10 +51,11 @@ local selfHitbox = nil
 local aimbotConnections = {}
 local fovCircle = nil
 local sheriffLine = nil
+local keyBindMode = nil
 
--- ===== Переподключение =====
-local function onCharacterAdded(newChar)
-    Character = newChar
+-- ===== Обновление персонажа при респавне =====
+local function refreshCharacter()
+    Character = getCharacter()
     RootPart = Character:WaitForChild("HumanoidRootPart")
     Humanoid = Character:WaitForChild("Humanoid")
     if enabled and TARGET then flyUnder(TARGET) end
@@ -53,7 +64,7 @@ local function onCharacterAdded(newChar)
     updateFovCircle()
     updateSheriffWeaponLine()
 end
-Player.CharacterAdded:Connect(onCharacterAdded)
+Player.CharacterAdded:Connect(refreshCharacter)
 
 -- ===== Основные функции =====
 local function getTargetByName(name)
@@ -143,7 +154,7 @@ local function flyUnder(target)
     end)
 end
 
--- ===== Хитбокс себя =====
+-- ===== Хитбокс себя (увеличенный) =====
 local function updateSelfHitbox()
     if selfHitbox then selfHitbox:Destroy(); selfHitbox = nil end
     if not RootPart then return end
@@ -158,7 +169,7 @@ local function updateSelfHitbox()
     selfHitbox.Parent = RootPart
 end
 
--- ===== ESP =====
+-- ===== ESP (подсветка игроков по всей карте) =====
 local function clearESP()
     for plr, box in pairs(espBoxes) do if box and box.Parent then box:Destroy() end end
     espBoxes = {}
@@ -216,7 +227,7 @@ end
 game.Players.PlayerAdded:Connect(updateESP)
 game.Players.PlayerRemoving:Connect(updateESP)
 
--- ===== FOV КРУГ (всегда на экране) =====
+-- ===== FOV круг =====
 local function updateFovCircle()
     if fovCircle then fovCircle:Destroy(); fovCircle = nil end
     if not CONFIG.FOV_CIRCLE_ENABLED then return end
@@ -235,7 +246,6 @@ local function updateFovCircle()
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(1,0)
     corner.Parent = fovCircle
-    -- полупрозрачный круг
     local inner = Instance.new("Frame")
     inner.Size = UDim2.new(1, -4, 1, -4)
     inner.Position = UDim2.new(0, 2, 0, 2)
@@ -248,37 +258,37 @@ local function updateFovCircle()
     corner2.Parent = inner
 end
 
--- ===== Линии к оружию шерифа после его смерти =====
+-- ===== Линии к оружию шерифа =====
 local function updateSheriffWeaponLine()
-    if sheriffLine then sheriffLine:Destroy(); sheriffLine = nil end
+    if sheriffLine then
+        if sheriffLine.line then sheriffLine.line:Destroy() end
+        if sheriffLine.connection then sheriffLine.connection:Disconnect() end
+        sheriffLine = nil
+    end
     if not CONFIG.SHERIFF_WEAPON_LINE_ENABLED then return end
-    -- Ищем шерифа (если мёртв, его оружие может лежать на земле)
-    -- В MM2 оружие выпадает как часть тела или как отдельный объект
-    -- Упрощённо: ищем игрока-шерифа, если он мёртв, ищем его оружие в workspace
+    -- Ищем мёртвого шерифа (нет персонажа) и его оружие в workspace
     local sheriff = nil
     for _, plr in ipairs(game.Players:GetPlayers()) do
         if plr ~= Player then
             local char = plr.Character
-            if char then
-                local tool = char:FindFirstChildWhichIsA("Tool")
-                if tool and (tool.Name:lower():find("gun") or tool.Name:lower():find("pistol") or tool.Name:lower():find("revolver")) then
-                    sheriff = plr
-                    break
-                end
+            if not char or not char.Parent then
+                -- возможно, мёртв, но оружие могло выпасть
+                -- проверим, был ли он шерифом (по оружию в инвентаре до смерти - сложно)
+                -- упрощённо: ищем оружие с именем gun/pistol/revolver в workspace
             end
         end
     end
-    if not sheriff or sheriff.Character then return end -- если жив, линия не нужна
-    -- Ищем выпавшее оружие (обычно оно под именем "Tool" или "Handle")
     local weapon = nil
     for _, obj in ipairs(workspace:GetChildren()) do
-        if obj:IsA("Tool") and obj.Name:lower():find("gun") then
-            weapon = obj
-            break
+        if obj:IsA("Tool") then
+            local name = obj.Name:lower()
+            if name:find("gun") or name:find("pistol") or name:find("revolver") then
+                weapon = obj
+                break
+            end
         end
     end
     if not weapon then return end
-    -- Создаём линию от камеры к оружию
     local line = Instance.new("Frame")
     line.Name = "SheriffWeaponLine"
     line.BackgroundColor3 = CONFIG.SHERIFF_WEAPON_LINE_COLOR
@@ -286,7 +296,6 @@ local function updateSheriffWeaponLine()
     line.Size = UDim2.new(0, 2, 0, 0)
     line.ZIndex = 998
     line.Parent = Player.PlayerGui
-    -- Обновляем позицию линии каждый кадр
     local conn
     conn = game:GetService("RunService").Heartbeat:Connect(function()
         if not CONFIG.SHERIFF_WEAPON_LINE_ENABLED or not weapon or not weapon.Parent then
@@ -310,10 +319,11 @@ local function updateSheriffWeaponLine()
     sheriffLine = {line = line, connection = conn}
 end
 
--- ===== Аимбот =====
+-- ===== Аимбот с авто-стрельбой/броском =====
 local VirtualUser = game:GetService("VirtualUser")
 local function getAimbotTarget(weapon, isMurderer, isSheriff)
     local camera = workspace.CurrentCamera
+    if not camera then return nil end
     local cameraPos = camera.CFrame.Position
     local cameraDir = camera.CFrame.LookVector
     local bestScore = math.huge
@@ -336,7 +346,9 @@ local function getAimbotTarget(weapon, isMurderer, isSheriff)
             if not isTargetMurderer then continue end
             local dist = (hrp.Position - cameraPos).Magnitude
             if dist > CONFIG.SHERIFF_RADIUS then continue end
-        else continue end
+        else
+            continue
+        end
         local dist = (hrp.Position - cameraPos).Magnitude
         if dist > CONFIG.AIMBOT_RADIUS then continue end
         local toTarget = (hrp.Position - cameraPos).Unit
@@ -352,7 +364,9 @@ local function getAimbotTarget(weapon, isMurderer, isSheriff)
 end
 
 local function startAimbot()
-    for _, conn in ipairs(aimbotConnections) do if conn and conn.heartbeat then conn.heartbeat:Disconnect() end end
+    for _, conn in ipairs(aimbotConnections) do
+        if conn and conn.heartbeat then conn.heartbeat:Disconnect() end
+    end
     aimbotConnections = {}
     if not CONFIG.AIMBOT_ENABLED then return end
     local function onWeaponEquipped(tool)
@@ -369,9 +383,11 @@ local function startAimbot()
                 local targetHrp = target.Character:FindFirstChild("HumanoidRootPart")
                 if targetHrp then
                     local camera = workspace.CurrentCamera
-                    camera.CFrame = CFrame.new(camera.CFrame.Position, targetHrp.Position)
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new(0,0), camera.CFrame.Position)
+                    if camera then
+                        camera.CFrame = CFrame.new(camera.CFrame.Position, targetHrp.Position)
+                        VirtualUser:CaptureController()
+                        VirtualUser:ClickButton2(Vector2.new(0,0), camera.CFrame.Position)
+                    end
                 end
             end
         end)
@@ -386,7 +402,47 @@ local function startAimbot()
 end
 startAimbot()
 
--- ===== КРАСИВОЕ ПЕРЕЛИВАЮЩЕЕСЯ МЕНЮ =====
+-- ===== Биндинг клавиш =====
+local function updateBindings()
+    -- Обработчик нажатий клавиш
+    local inputService = game:GetService("UserInputService")
+    inputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if keyBindMode then
+            -- Режим ожидания новой клавиши
+            if input.KeyCode ~= Enum.KeyCode.Unknown then
+                if keyBindMode == "FLING" then CONFIG.BIND_FLING = input.KeyCode
+                elseif keyBindMode == "FLYJUMP" then CONFIG.BIND_FLYJUMP = input.KeyCode
+                elseif keyBindMode == "AIMBOT" then CONFIG.BIND_AIMBOT = input.KeyCode
+                elseif keyBindMode == "ESP" then CONFIG.BIND_ESP = input.KeyCode end
+                keyBindMode = nil
+                statusLabel.Text = "Клавиша назначена!"
+                statusLabel.TextColor3 = Color3.fromRGB(0,255,0)
+                wait(1)
+                if enabled then
+                    statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
+                    statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
+                else
+                    statusLabel.Text = "Выключено"
+                    statusLabel.TextColor3 = Color3.fromRGB(255,70,70)
+                end
+            end
+            return
+        end
+        if input.KeyCode == CONFIG.BIND_FLING then
+            toggleBtn.MouseButton1Click:Fire()
+        elseif input.KeyCode == CONFIG.BIND_FLYJUMP then
+            if flyjumpBtn then flyjumpBtn.MouseButton1Click:Fire() end
+        elseif input.KeyCode == CONFIG.BIND_AIMBOT then
+            if aimbotToggle then aimbotToggle.MouseButton1Click:Fire() end
+        elseif input.KeyCode == CONFIG.BIND_ESP then
+            if espToggle then espToggle.MouseButton1Click:Fire() end
+        end
+    end)
+end
+updateBindings()
+
+-- ===== GUI =====
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlingMenu"
 screenGui.Parent = Player.PlayerGui
@@ -406,7 +462,7 @@ local cornerMain = Instance.new("UICorner")
 cornerMain.CornerRadius = UDim.new(0, 25)
 cornerMain.Parent = mainFrame
 
--- Градиентный фон (переливающийся)
+-- Градиентный фон
 local bgGradient = Instance.new("UIGradient")
 bgGradient.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(60,0,100)),
@@ -416,8 +472,6 @@ bgGradient.Color = ColorSequence.new{
 }
 bgGradient.Rotation = 0
 bgGradient.Parent = mainFrame
-
--- Анимация градиента
 local gradAngle = 0
 game:GetService("RunService").Heartbeat:Connect(function()
     if not mainFrame.Visible then return end
@@ -436,7 +490,7 @@ shadow.ImageTransparency = 0.5
 shadow.ZIndex = 0
 shadow.Parent = mainFrame
 
--- Заголовок с переливом
+-- Заголовок
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1,0,0,60)
 header.Position = UDim2.new(0,0,0,0)
@@ -488,7 +542,7 @@ closeScriptBtn.MouseButton1Click:Connect(function()
     print("Скрипт остановлен.")
 end)
 
--- Палитра цветов фона (дополнительная, поверх градиента)
+-- Палитра цветов фона
 local paletteFrame = Instance.new("Frame")
 paletteFrame.Size = UDim2.new(1,0,0,35)
 paletteFrame.Position = UDim2.new(0,0,0,65)
@@ -517,7 +571,6 @@ for i, color in ipairs(colors) do
     btn.MouseButton1Click:Connect(function()
         mainFrame.BackgroundColor3 = color
         mainFrame.BackgroundTransparency = 0.15
-        -- убираем градиент, если он мешает
         bgGradient.Enabled = false
     end)
 end
@@ -533,7 +586,7 @@ statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.GothamSemibold
 statusLabel.Parent = mainFrame
 
--- Кнопка включения
+-- Кнопка включения основного режима
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0.8,0,0,40)
 toggleBtn.Position = UDim2.new(0.1,0,0,140)
@@ -565,7 +618,125 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ===== Функция создания сворачиваемых секций =====
+-- Кнопка Flyjump (автоматическое подкидывание)
+local flyjumpBtn = Instance.new("TextButton")
+flyjumpBtn.Size = UDim2.new(0.8,0,0,30)
+flyjumpBtn.Position = UDim2.new(0.1,0,0,185)
+flyjumpBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
+flyjumpBtn.Text = "Flyjump: Выкл"
+flyjumpBtn.TextColor3 = Color3.fromRGB(255,255,255)
+flyjumpBtn.TextScaled = true
+flyjumpBtn.Font = Enum.Font.Gotham
+flyjumpBtn.BorderSizePixel = 0
+flyjumpBtn.Parent = mainFrame
+local cornerFJ = Instance.new("UICorner")
+cornerFJ.CornerRadius = UDim.new(0,10)
+cornerFJ.Parent = flyjumpBtn
+flyjumpBtn.MouseButton1Click:Connect(function()
+    CONFIG.FLYJUMP_ENABLED = not CONFIG.FLYJUMP_ENABLED
+    flyjumpBtn.Text = "Flyjump: " .. (CONFIG.FLYJUMP_ENABLED and "Вкл" or "Выкл")
+    if enabled then
+        flyjumpActive = CONFIG.FLYJUMP_ENABLED
+        if flyjumpActive then
+            statusLabel.Text = "Flyjump активен"
+            statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
+        else
+            statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
+            statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
+        end
+    end
+end)
+
+-- Кнопка выбора цели (отдельное окно слева)
+local playerListBtn = Instance.new("TextButton")
+playerListBtn.Size = UDim2.new(0.8,0,0,30)
+playerListBtn.Position = UDim2.new(0.1,0,0,220)
+playerListBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
+playerListBtn.Text = "Выбрать цель: " .. (CONFIG.TARGET_NAME ~= "" and CONFIG.TARGET_NAME or "авто")
+playerListBtn.TextColor3 = Color3.fromRGB(255,255,255)
+playerListBtn.TextScaled = true
+playerListBtn.Font = Enum.Font.Gotham
+playerListBtn.BorderSizePixel = 0
+playerListBtn.Parent = mainFrame
+local cornerPL = Instance.new("UICorner")
+cornerPL.CornerRadius = UDim.new(0,10)
+cornerPL.Parent = playerListBtn
+
+-- Окно списка игроков (слева, перетаскиваемое)
+local playerListFrame = Instance.new("Frame")
+playerListFrame.Size = UDim2.new(0, 200, 0, 300)
+playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
+playerListFrame.BackgroundColor3 = Color3.fromRGB(30,35,45)
+playerListFrame.BackgroundTransparency = 0.2
+playerListFrame.BorderSizePixel = 0
+playerListFrame.Visible = false
+playerListFrame.Active = true
+playerListFrame.Draggable = true
+playerListFrame.Parent = screenGui
+local cornerPLF = Instance.new("UICorner")
+cornerPLF.CornerRadius = UDim.new(0,12)
+cornerPLF.Parent = playerListFrame
+local plTitle = Instance.new("TextLabel")
+plTitle.Size = UDim2.new(1,0,0,30)
+plTitle.Position = UDim2.new(0,0,0,0)
+plTitle.BackgroundColor3 = Color3.fromRGB(40,45,60)
+plTitle.Text = "Игроки"
+plTitle.TextColor3 = Color3.fromRGB(255,255,255)
+plTitle.TextScaled = true
+plTitle.Font = Enum.Font.GothamBold
+plTitle.Parent = playerListFrame
+local cornerPLT = Instance.new("UICorner")
+cornerPLT.CornerRadius = UDim.new(0,12)
+cornerPLT.Parent = plTitle
+local plScrolling = Instance.new("ScrollingFrame")
+plScrolling.Size = UDim2.new(1,0,1,-30)
+plScrolling.Position = UDim2.new(0,0,0,30)
+plScrolling.BackgroundTransparency = 1
+plScrolling.CanvasSize = UDim2.new(0,0,0,0)
+plScrolling.ScrollBarThickness = 8
+plScrolling.Parent = playerListFrame
+local plLayout = Instance.new("UIListLayout")
+plLayout.Padding = UDim.new(0,4)
+plLayout.SortOrder = Enum.SortOrder.Name
+plLayout.Parent = plScrolling
+local function updatePlayerListWindow()
+    for _, child in ipairs(plScrolling:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    local ySize = 0
+    for _, plr in ipairs(game.Players:GetPlayers()) do
+        if plr ~= Player then
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1,0,0,25)
+            btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
+            btn.Text = plr.Name
+            btn.TextColor3 = Color3.fromRGB(255,255,255)
+            btn.TextScaled = true
+            btn.Font = Enum.Font.Gotham
+            btn.BorderSizePixel = 0
+            btn.Parent = plScrolling
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0,6)
+            corner.Parent = btn
+            btn.MouseButton1Click:Connect(function()
+                CONFIG.TARGET_NAME = plr.Name
+                playerListBtn.Text = "Выбрать цель: " .. plr.Name
+                playerListFrame.Visible = false
+                if enabled then
+                    local newTarget = getTarget()
+                    if newTarget then flyUnder(newTarget)
+                    else stopFlying(); statusLabel.Text = "Цель не найдена!"; statusLabel.TextColor3 = Color3.fromRGB(255,0,0) end
+                end
+            end)
+            ySize = ySize + 25 + 4
+        end
+    end
+    plScrolling.CanvasSize = UDim2.new(0,0,0,ySize)
+end
+playerListBtn.MouseButton1Click:Connect(function()
+    playerListFrame.Visible = not playerListFrame.Visible
+    if playerListFrame.Visible then updatePlayerListWindow() end
+end)
+
+-- ===== Разделы меню (в линию, на всю ширину) =====
 local function createSection(titleText, yStart)
     local sectionBtn = Instance.new("TextButton")
     sectionBtn.Size = UDim2.new(0.9,0,0,30)
@@ -602,7 +773,7 @@ local function createSection(titleText, yStart)
     return content
 end
 
--- ===== Создание слайдера в секции =====
+-- Создание слайдера в секции
 local function createSliderInSection(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6,0,0,22)
@@ -681,7 +852,7 @@ local function createSliderInSection(parent, labelText, yPos, minVal, maxVal, st
     return label
 end
 
--- ===== Создание кнопки-переключателя в секции =====
+-- Создание переключателя
 local function createToggleInSection(parent, labelText, yPos, getter, setter)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.8,0,0,30)
@@ -699,7 +870,6 @@ local function createToggleInSection(parent, labelText, yPos, getter, setter)
     btn.MouseButton1Click:Connect(function()
         setter(not getter())
         btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
-        -- обновить соответствующие элементы
         if labelText:find("FOV") then updateFovCircle()
         elseif labelText:find("Линии") then updateSheriffWeaponLine()
         elseif labelText:find("Хитбокс") then updateSelfHitbox()
@@ -713,17 +883,7 @@ local function createToggleInSection(parent, labelText, yPos, getter, setter)
     return btn
 end
 
--- ===== СОЗДАНИЕ СЕКЦИЙ =====
-local flingSection = createSection("Fling", 190)
-createSliderInSection(flingSection, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
-createSliderInSection(flingSection, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
-createSliderInSection(flingSection, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
-createSliderInSection(flingSection, "Скорость Fly: ", 105, 1, 20, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
-createToggleInSection(flingSection, "Flyjump: ", 140, function() return CONFIG.FLYJUMP_ENABLED end, function(v) CONFIG.FLYJUMP_ENABLED = v end)
-
-local espSection = createSection("ESP", 190+180)
-createToggleInSection(espSection, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
--- Цвета для ESP (будем использовать кнопки с цветами)
+-- Создание выбора цвета
 local function createColorPicker(parent, labelText, yPos, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.4,0,0,22)
@@ -758,117 +918,79 @@ local function createColorPicker(parent, labelText, yPos, getter, setter)
     end)
     return btn
 end
+
+-- Создание биндинга клавиш
+local function createKeyBind(parent, labelText, yPos, bindKey)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.4,0,0,22)
+    label.Position = UDim2.new(0.05,0,0,yPos)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(200,200,220)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.Parent = parent
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.3,0,0,25)
+    btn.Position = UDim2.new(0.5,0,0,yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
+    btn.Text = tostring(bindKey):gsub("Enum.KeyCode.", "")
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        keyBindMode = labelText:gsub(": ", "")
+        statusLabel.Text = "Нажмите клавишу для " .. labelText
+        statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
+        btn.Text = "..."
+    end)
+end
+
+-- ===== Создание разделов =====
+local flingSection = createSection("Fling", 260)
+createSliderInSection(flingSection, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
+createSliderInSection(flingSection, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
+createSliderInSection(flingSection, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
+createSliderInSection(flingSection, "Скорость Fly: ", 105, 1, 50, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
+createKeyBind(flingSection, "Бинд Fling: ", 140, CONFIG.BIND_FLING)
+
+local espSection = createSection("ESP", 260+180)
+createToggleInSection(espSection, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
 createColorPicker(espSection, "Обычные: ", 35, function() return CONFIG.ESP_COLOR_NORMAL end, function(v) CONFIG.ESP_COLOR_NORMAL = v end)
 createColorPicker(espSection, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
 createColorPicker(espSection, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
 createColorPicker(espSection, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
+createKeyBind(espSection, "Бинд ESP: ", 155, CONFIG.BIND_ESP)
 
-local hitboxSection = createSection("Хитбокс себя", 190+180+170)
+local hitboxSection = createSection("Хитбокс себя", 260+180+190)
 createSliderInSection(hitboxSection, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
-createToggleInSection(hitboxSection, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end) -- используем ESP как триггер
+createToggleInSection(hitboxSection, "Хитбокс: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end) -- используем ESP как триггер, но лучше отдельный переключатель
 
-local fovSection = createSection("FOV Круг", 190+180+170+100)
+local fovSection = createSection("FOV Круг", 260+180+190+90)
 createToggleInSection(fovSection, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
 createSliderInSection(fovSection, "Радиус круга: ", 35, 50, 300, 5, function() return CONFIG.FOV_CIRCLE_RADIUS end, function(v) CONFIG.FOV_CIRCLE_RADIUS = v end)
 createColorPicker(fovSection, "Цвет круга: ", 70, function() return CONFIG.FOV_CIRCLE_COLOR end, function(v) CONFIG.FOV_CIRCLE_COLOR = v end)
 
-local sheriffSection = createSection("Линии к оружию шерифа", 190+180+170+100+140)
+local sheriffSection = createSection("Линии к оружию шерифа", 260+180+190+90+120)
 createToggleInSection(sheriffSection, "Линии: ", 0, function() return CONFIG.SHERIFF_WEAPON_LINE_ENABLED end, function(v) CONFIG.SHERIFF_WEAPON_LINE_ENABLED = v end)
 createColorPicker(sheriffSection, "Цвет линии: ", 35, function() return CONFIG.SHERIFF_WEAPON_LINE_COLOR end, function(v) CONFIG.SHERIFF_WEAPON_LINE_COLOR = v end)
 
-local aimbotSection = createSection("Аимбот", 190+180+170+100+140+100)
+local aimbotSection = createSection("Аимбот", 260+180+190+90+120+90)
 createToggleInSection(aimbotSection, "Аимбот: ", 0, function() return CONFIG.AIMBOT_ENABLED end, function(v) CONFIG.AIMBOT_ENABLED = v end)
 createSliderInSection(aimbotSection, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
 createSliderInSection(aimbotSection, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
 createSliderInSection(aimbotSection, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
+createKeyBind(aimbotSection, "Бинд Аимбот: ", 140, CONFIG.BIND_AIMBOT)
 
--- ===== Выбор цели (отдельное окно) =====
-local playerListBtn = Instance.new("TextButton")
-playerListBtn.Size = UDim2.new(0.8,0,0,30)
-playerListBtn.Position = UDim2.new(0.1,0,0, 190+180+170+100+140+100+150) -- динамически
-playerListBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
-playerListBtn.Text = "Выбрать цель: " .. (CONFIG.TARGET_NAME ~= "" and CONFIG.TARGET_NAME or "авто")
-playerListBtn.TextColor3 = Color3.fromRGB(255,255,255)
-playerListBtn.TextScaled = true
-playerListBtn.Font = Enum.Font.Gotham
-playerListBtn.BorderSizePixel = 0
-playerListBtn.Parent = mainFrame
-local cornerPL = Instance.new("UICorner")
-cornerPL.CornerRadius = UDim.new(0,10)
-cornerPL.Parent = playerListBtn
-
-local playerListFrame = Instance.new("Frame")
-playerListFrame.Size = UDim2.new(0, 200, 0, 300)
-playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
-playerListFrame.BackgroundColor3 = Color3.fromRGB(30,35,45)
-playerListFrame.BackgroundTransparency = 0.2
-playerListFrame.BorderSizePixel = 0
-playerListFrame.Visible = false
-playerListFrame.Active = true
-playerListFrame.Draggable = true
-playerListFrame.Parent = screenGui
-local cornerPLF = Instance.new("UICorner")
-cornerPLF.CornerRadius = UDim.new(0,12)
-cornerPLF.Parent = playerListFrame
-local plTitle = Instance.new("TextLabel")
-plTitle.Size = UDim2.new(1,0,0,30)
-plTitle.Position = UDim2.new(0,0,0,0)
-plTitle.BackgroundColor3 = Color3.fromRGB(40,45,60)
-plTitle.Text = "Игроки"
-plTitle.TextColor3 = Color3.fromRGB(255,255,255)
-plTitle.TextScaled = true
-plTitle.Font = Enum.Font.GothamBold
-plTitle.Parent = playerListFrame
-local cornerPLT = Instance.new("UICorner")
-cornerPLT.CornerRadius = UDim.new(0,12)
-cornerPLT.Parent = plTitle
-local plScrolling = Instance.new("ScrollingFrame")
-plScrolling.Size = UDim2.new(1,0,1,-30)
-plScrolling.Position = UDim2.new(0,0,0,30)
-plScrolling.BackgroundTransparency = 1
-plScrolling.CanvasSize = UDim2.new(0,0,0,0)
-plScrolling.ScrollBarThickness = 8
-plScrolling.Parent = playerListFrame
-local plLayout = Instance.new("UIListLayout")
-plLayout.Padding = UDim.new(0,4)
-plLayout.SortOrder = Enum.SortOrder.Name
-plLayout.Parent = plScrolling
-local function updatePlayerListWindow()
-    for _, child in ipairs(plScrolling:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
-    local ySize = 0
-    for _, plr in ipairs(game.Players:GetPlayers()) do
-        if plr ~= Player then
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1,0,0,25)
-            btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
-            btn.Text = plr.Name
-            btn.TextColor3 = Color3.fromRGB(255,255,255)
-            btn.TextScaled = true
-            btn.Font = Enum.Font.Gotham
-            btn.BorderSizePixel = 0
-            btn.Parent = plScrolling
-            local corner = Instance.new("UICorner")
-            corner.CornerRadius = UDim.new(0,6)
-            corner.Parent = btn
-            btn.MouseButton1Click:Connect(function()
-                CONFIG.TARGET_NAME = plr.Name
-                playerListBtn.Text = "Выбрать цель: " .. plr.Name
-                playerListFrame.Visible = false
-                if enabled then
-                    local newTarget = getTarget()
-                    if newTarget then flyUnder(newTarget)
-                    else stopFlying(); statusLabel.Text = "Цель не найдена!"; statusLabel.TextColor3 = Color3.fromRGB(255,0,0) end
-                end
-            end)
-            ySize = ySize + 25 + 4
-        end
-    end
-    plScrolling.CanvasSize = UDim2.new(0,0,0,ySize)
-end
-playerListBtn.MouseButton1Click:Connect(function()
-    playerListFrame.Visible = not playerListFrame.Visible
-    if playerListFrame.Visible then updatePlayerListWindow() end
-end)
+-- Также добавим бинд для Flyjump в отдельный раздел (или в Fling, но добавим отдельно)
+local bindSection = createSection("Бинды", 260+180+190+90+120+90+180)
+createKeyBind(bindSection, "Бинд Flyjump: ", 0, CONFIG.BIND_FLYJUMP)
 
 -- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
@@ -887,13 +1009,9 @@ game:GetService("UserInputService").InputBegan:Connect(function(input, gameProce
             updateESP()
             updateFovCircle()
             updateSheriffWeaponLine()
+            -- Обновляем отображение кнопок биндов
         end
     end
-end)
-
-Player.CharacterAdded:Connect(function()
-    stopFlying()
-    clearESP()
 end)
 
 print("Скрипт загружен. Правый Shift для меню.")
