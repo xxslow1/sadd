@@ -22,16 +22,19 @@ local CONFIG = {
     AIMBOT_FOV = 45,
     AIMBOT_RADIUS = 100,
     SHERIFF_RADIUS = 100,
+    FLYJUMP_ENABLED = false,   -- отдельный режим подкидывания
 }
 
 local TARGET = nil
 local enabled = false
+local flyjumpActive = false
 local bv, gyro = nil, nil
 local lastFling = 0
 local heartbeatConnection = nil
 local menuOpen = false
 local espBoxes, roleBoxes = {}, {}
 local aimbotConnections = {}
+local playerListOpen = false
 
 -- ===== Вспомогательные функции =====
 local function getTargetByName(name)
@@ -62,11 +65,15 @@ end
 local function flingTarget(target)
     if not target or not target.Character then return end
     local root = target.Character:FindFirstChild("HumanoidRootPart")
-    if root then root.Velocity = Vector3.new(0, CONFIG.FLING_POWER, 0) end
+    if root then
+        -- Резкий толчок вверх (flyjump эффект)
+        root.Velocity = Vector3.new(0, CONFIG.FLING_POWER, 0)
+    end
 end
 
 local function stopFlying()
     enabled = false
+    flyjumpActive = false
     if bv then bv:Destroy(); bv = nil end
     if gyro then gyro:Destroy(); gyro = nil end
     if heartbeatConnection then heartbeatConnection:Disconnect(); heartbeatConnection = nil end
@@ -81,11 +88,10 @@ local function flyUnder(target)
     if not target or not target.Character then return end
     stopFlying()
 
-    bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e5,1e5,1e5)
-    bv.Velocity = Vector3.new(0,0,0)
-    bv.Parent = RootPart
-
+    -- Создаём BodyVelocity для движения (но будем использовать CFrame для noclip)
+    -- Однако для noclip используем CFrame, поэтому BodyVelocity не нужен, но оставим для совместимости.
+    -- Вместо BodyVelocity будем устанавливать CFrame напрямую.
+    -- Удалим BV, оставим только gyro для удержания положения лёжа.
     gyro = Instance.new("BodyGyro")
     gyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
     gyro.CFrame = CFrame.new(RootPart.Position, RootPart.Position + Vector3.new(0,-1,0))
@@ -96,6 +102,7 @@ local function flyUnder(target)
     Humanoid.PlatformStand = true
 
     enabled = true
+    flyjumpActive = CONFIG.FLYJUMP_ENABLED
     lastFling = 0
     if statusLabel then
         statusLabel.Text = "Включено (цель: " .. target.Name .. ")"
@@ -109,22 +116,21 @@ local function flyUnder(target)
             stopFlying(); return
         end
 
+        -- Перемещение под игроком через CFrame (noclip, стены не мешают)
         local targetPos = target.Character.HumanoidRootPart.Position
         local underPos = targetPos - Vector3.new(0, CONFIG.FOLLOW_DISTANCE, 0)
-        local direction = (underPos - RootPart.Position)
+        RootPart.CFrame = CFrame.new(underPos)  -- телепорт, игнорируя стены
 
-        if direction.Magnitude > 10 then
-            RootPart.CFrame = CFrame.new(underPos)
-        else
-            bv.Velocity = direction * CONFIG.FLY_SPEED
-        end
-
+        -- Удержание лёжа
         local rot = CFrame.Angles(math.rad(90), 0, 0)
-        RootPart.CFrame = CFrame.new(RootPart.Position) * rot
+        RootPart.CFrame = RootPart.CFrame * rot
 
-        if tick() - lastFling > CONFIG.FLING_INTERVAL then
-            flingTarget(target)
-            lastFling = tick()
+        -- Подкидывание, если включён flyjump
+        if flyjumpActive then
+            if tick() - lastFling > CONFIG.FLING_INTERVAL then
+                flingTarget(target)
+                lastFling = tick()
+            end
         end
     end)
 end
@@ -196,7 +202,7 @@ end
 game.Players.PlayerAdded:Connect(updateESP)
 game.Players.PlayerRemoving:Connect(updateESP)
 
--- ===== Аимбот =====
+-- ===== Аимбот (без изменений) =====
 local function getAimbotTarget(weapon, isMurderer, isSheriff)
     local camera = workspace.CurrentCamera
     local cameraPos = camera.CFrame.Position
@@ -300,6 +306,7 @@ screenGui.Name = "FlingMenu"
 screenGui.Parent = Player.PlayerGui
 screenGui.ResetOnSpawn = false
 
+-- Основное окно (центр)
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 460, 0, 700)
 mainFrame.Position = UDim2.new(0.5, -230, 0.5, -350)
@@ -367,7 +374,7 @@ closeScriptBtn.MouseButton1Click:Connect(function()
     print("Скрипт остановлен.")
 end)
 
--- Палитра цветов (сверху, под заголовком)
+-- Палитра цветов (сверху)
 local paletteFrame = Instance.new("Frame")
 paletteFrame.Size = UDim2.new(1,0,0,30)
 paletteFrame.Position = UDim2.new(0,0,0,60)
@@ -415,7 +422,7 @@ statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.GothamSemibold
 statusLabel.Parent = mainFrame
 
--- Кнопка включения
+-- Кнопка включения основного режима
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0.8,0,0,40)
 toggleBtn.Position = UDim2.new(0.1,0,0,125)
@@ -447,10 +454,39 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Выбор цели
+-- Переключатель Flyjump (отдельно)
+local flyjumpBtn = Instance.new("TextButton")
+flyjumpBtn.Size = UDim2.new(0.8,0,0,30)
+flyjumpBtn.Position = UDim2.new(0.1,0,0,170)
+flyjumpBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
+flyjumpBtn.Text = "Flyjump: Выкл"
+flyjumpBtn.TextColor3 = Color3.fromRGB(255,255,255)
+flyjumpBtn.TextScaled = true
+flyjumpBtn.Font = Enum.Font.Gotham
+flyjumpBtn.BorderSizePixel = 0
+flyjumpBtn.Parent = mainFrame
+local cornerFJ = Instance.new("UICorner")
+cornerFJ.CornerRadius = UDim.new(0,10)
+cornerFJ.Parent = flyjumpBtn
+flyjumpBtn.MouseButton1Click:Connect(function()
+    CONFIG.FLYJUMP_ENABLED = not CONFIG.FLYJUMP_ENABLED
+    flyjumpBtn.Text = "Flyjump: " .. (CONFIG.FLYJUMP_ENABLED and "Вкл" or "Выкл")
+    if enabled then
+        flyjumpActive = CONFIG.FLYJUMP_ENABLED
+        if flyjumpActive then
+            statusLabel.Text = "Flyjump активен"
+            statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
+        else
+            statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
+            statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
+        end
+    end
+end)
+
+-- Кнопка выбора цели (открывает отдельное окно слева)
 local playerListBtn = Instance.new("TextButton")
 playerListBtn.Size = UDim2.new(0.8,0,0,30)
-playerListBtn.Position = UDim2.new(0.1,0,0,175)
+playerListBtn.Position = UDim2.new(0.1,0,0,210)
 playerListBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
 playerListBtn.Text = "Выбрать цель: " .. (CONFIG.TARGET_NAME ~= "" and CONFIG.TARGET_NAME or "авто")
 playerListBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -462,33 +498,49 @@ local cornerPL = Instance.new("UICorner")
 cornerPL.CornerRadius = UDim.new(0,10)
 cornerPL.Parent = playerListBtn
 
+-- Отдельное окно для списка игроков (слева от главного)
 local playerListFrame = Instance.new("Frame")
-playerListFrame.Size = UDim2.new(0.8,0,0,120)
-playerListFrame.Position = UDim2.new(0.1,0,0,210)
-playerListFrame.BackgroundColor3 = Color3.fromRGB(40,45,60)
+playerListFrame.Size = UDim2.new(0, 200, 0, 300)
+playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0) -- слева, чуть ниже
+playerListFrame.BackgroundColor3 = Color3.fromRGB(30,35,45)
 playerListFrame.BackgroundTransparency = 0.2
 playerListFrame.BorderSizePixel = 0
 playerListFrame.Visible = false
-playerListFrame.Parent = mainFrame
+playerListFrame.Active = true
+playerListFrame.Draggable = true
+playerListFrame.Parent = screenGui
 local cornerPLF = Instance.new("UICorner")
-cornerPLF.CornerRadius = UDim.new(0,10)
+cornerPLF.CornerRadius = UDim.new(0,12)
 cornerPLF.Parent = playerListFrame
 
-local scrollingFrame = Instance.new("ScrollingFrame")
-scrollingFrame.Size = UDim2.new(1,0,1,0)
-scrollingFrame.Position = UDim2.new(0,0,0,0)
-scrollingFrame.BackgroundTransparency = 1
-scrollingFrame.CanvasSize = UDim2.new(0,0,0,0)
-scrollingFrame.ScrollBarThickness = 8
-scrollingFrame.Parent = playerListFrame
+local plTitle = Instance.new("TextLabel")
+plTitle.Size = UDim2.new(1,0,0,30)
+plTitle.Position = UDim2.new(0,0,0,0)
+plTitle.BackgroundColor3 = Color3.fromRGB(40,45,60)
+plTitle.Text = "Игроки"
+plTitle.TextColor3 = Color3.fromRGB(255,255,255)
+plTitle.TextScaled = true
+plTitle.Font = Enum.Font.GothamBold
+plTitle.Parent = playerListFrame
+local cornerPLT = Instance.new("UICorner")
+cornerPLT.CornerRadius = UDim.new(0,12)
+cornerPLT.Parent = plTitle
 
-local playerListLayout = Instance.new("UIListLayout")
-playerListLayout.Padding = UDim.new(0,4)
-playerListLayout.SortOrder = Enum.SortOrder.Name
-playerListLayout.Parent = scrollingFrame
+local plScrolling = Instance.new("ScrollingFrame")
+plScrolling.Size = UDim2.new(1,0,1,-30)
+plScrolling.Position = UDim2.new(0,0,0,30)
+plScrolling.BackgroundTransparency = 1
+plScrolling.CanvasSize = UDim2.new(0,0,0,0)
+plScrolling.ScrollBarThickness = 8
+plScrolling.Parent = playerListFrame
 
-local function updatePlayerList()
-    for _, child in ipairs(scrollingFrame:GetChildren()) do
+local plLayout = Instance.new("UIListLayout")
+plLayout.Padding = UDim.new(0,4)
+plLayout.SortOrder = Enum.SortOrder.Name
+plLayout.Parent = plScrolling
+
+local function updatePlayerListWindow()
+    for _, child in ipairs(plScrolling:GetChildren()) do
         if child:IsA("TextButton") then child:Destroy() end
     end
     local ySize = 0
@@ -502,7 +554,7 @@ local function updatePlayerList()
             btn.TextScaled = true
             btn.Font = Enum.Font.Gotham
             btn.BorderSizePixel = 0
-            btn.Parent = scrollingFrame
+            btn.Parent = plScrolling
             local corner = Instance.new("UICorner")
             corner.CornerRadius = UDim.new(0,6)
             corner.Parent = btn
@@ -524,15 +576,19 @@ local function updatePlayerList()
             ySize = ySize + 25 + 4
         end
     end
-    scrollingFrame.CanvasSize = UDim2.new(0,0,0,ySize)
+    plScrolling.CanvasSize = UDim2.new(0,0,0,ySize)
 end
 
 playerListBtn.MouseButton1Click:Connect(function()
     playerListFrame.Visible = not playerListFrame.Visible
-    if playerListFrame.Visible then updatePlayerList() end
+    if playerListFrame.Visible then
+        updatePlayerListWindow()
+        -- позиционируем окно слева от главного
+        playerListFrame.Position = UDim2.new(0.01, 0, 0.1, 0)
+    end
 end)
 
--- Слайдеры
+-- Слайдеры (сдвинуты вниз из-за новой кнопки flyjump)
 local function createSlider(labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.8,0,0,22)
@@ -613,13 +669,13 @@ local function createSlider(labelText, yPos, minVal, maxVal, step, getter, sette
     return label
 end
 
-createSlider("Сила: ", 215, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
-createSlider("Дистанция: ", 275, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
-createSlider("Интервал: ", 335, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
-createSlider("Скорость Fly: ", 395, 1, 20, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
+createSlider("Сила: ", 250, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
+createSlider("Дистанция: ", 310, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
+createSlider("Интервал: ", 370, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
+createSlider("Скорость Fly: ", 430, 1, 20, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
 
 -- Настройки ESP
-local espY = 455
+local espY = 490
 local espToggle = Instance.new("TextButton")
 espToggle.Size = UDim2.new(0.25,0,0,25)
 espToggle.Position = UDim2.new(0.05,0,0,espY)
@@ -639,7 +695,6 @@ espToggle.MouseButton1Click:Connect(function()
     updateESP()
 end)
 
--- Цвет ESP
 local espColorBtn = Instance.new("TextButton")
 espColorBtn.Size = UDim2.new(0.06,0,0,20)
 espColorBtn.Position = UDim2.new(0.35,0,0,espY+2)
@@ -663,7 +718,7 @@ espColorBtn.MouseButton1Click:Connect(function()
 end)
 
 -- Аимбот настройки
-local aimbotY = 490
+local aimbotY = 525
 local aimbotToggle = Instance.new("TextButton")
 aimbotToggle.Size = UDim2.new(0.25,0,0,25)
 aimbotToggle.Position = UDim2.new(0.05,0,0,aimbotY)
@@ -683,7 +738,6 @@ aimbotToggle.MouseButton1Click:Connect(function()
     startAimbot()
 end)
 
--- FOV
 local fovLabel = Instance.new("TextLabel")
 fovLabel.Size = UDim2.new(0.15,0,0,20)
 fovLabel.Position = UDim2.new(0.4,0,0,aimbotY)
@@ -730,7 +784,6 @@ fovRight.MouseButton1Click:Connect(function()
     fovLabel.Text = "FOV: " .. CONFIG.AIMBOT_FOV
 end)
 
--- Кнопка копирования FOV
 local copyFovBtn = Instance.new("TextButton")
 copyFovBtn.Size = UDim2.new(0.06,0,0,20)
 copyFovBtn.Position = UDim2.new(0.66,0,0,aimbotY+2)
@@ -758,7 +811,6 @@ copyFovBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Радиус
 local radiusLabel = Instance.new("TextLabel")
 radiusLabel.Size = UDim2.new(0.2,0,0,20)
 radiusLabel.Position = UDim2.new(0.05,0,0,aimbotY+30)
