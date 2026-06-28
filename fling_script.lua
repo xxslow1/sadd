@@ -1,4 +1,4 @@
--- Fling Controller v5.0
+-- Fling Controller v8.0
 local Player = game.Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local RootPart = Character:WaitForChild("HumanoidRootPart")
@@ -6,23 +6,27 @@ local Humanoid = Character:WaitForChild("Humanoid")
 wait(0.5)
 
 local CONFIG = {
-    FLING_POWER = 150,
+    FLING_POWER = 200,
     FOLLOW_DISTANCE = 3,
     FLY_SPEED = 8,
     FLING_INTERVAL = 0.5,
-    GUI_BG_COLOR = Color3.fromRGB(20,22,30),
-    GUI_BG_TRANSPARENCY = 0.08,
-    GUI_ACCENT = Color3.fromRGB(0,180,255),
     TARGET_NAME = "",
     ESP_ENABLED = false,
-    ESP_COLOR = Color3.fromRGB(0,255,0),
-    HIGHLIGHT_MURDERER = Color3.fromRGB(255,0,0),
-    HIGHLIGHT_SHERIFF = Color3.fromRGB(0,0,255),
+    ESP_COLOR_NORMAL = Color3.fromRGB(0,255,0),
+    ESP_COLOR_MURDERER = Color3.fromRGB(255,0,0),
+    ESP_COLOR_SHERIFF = Color3.fromRGB(0,0,255),
+    ESP_COLOR_SELF = Color3.fromRGB(0,255,255),
+    SELF_HITBOX_SIZE = 3,
     AIMBOT_ENABLED = true,
     AIMBOT_FOV = 45,
     AIMBOT_RADIUS = 100,
     SHERIFF_RADIUS = 100,
-    FLYJUMP_ENABLED = false,   -- отдельный режим подкидывания
+    FLYJUMP_ENABLED = false,
+    FOV_CIRCLE_ENABLED = true,
+    FOV_CIRCLE_RADIUS = 150,  -- размер круга на экране
+    FOV_CIRCLE_COLOR = Color3.fromRGB(0,200,255),
+    SHERIFF_WEAPON_LINE_ENABLED = true,
+    SHERIFF_WEAPON_LINE_COLOR = Color3.fromRGB(255,200,0),
 }
 
 local TARGET = nil
@@ -33,10 +37,25 @@ local lastFling = 0
 local heartbeatConnection = nil
 local menuOpen = false
 local espBoxes, roleBoxes = {}, {}
+local selfHitbox = nil
 local aimbotConnections = {}
-local playerListOpen = false
+local fovCircle = nil
+local sheriffLine = nil
 
--- ===== Вспомогательные функции =====
+-- ===== Переподключение =====
+local function onCharacterAdded(newChar)
+    Character = newChar
+    RootPart = Character:WaitForChild("HumanoidRootPart")
+    Humanoid = Character:WaitForChild("Humanoid")
+    if enabled and TARGET then flyUnder(TARGET) end
+    startAimbot()
+    updateSelfHitbox()
+    updateFovCircle()
+    updateSheriffWeaponLine()
+end
+Player.CharacterAdded:Connect(onCharacterAdded)
+
+-- ===== Основные функции =====
 local function getTargetByName(name)
     if name and name ~= "" then return game.Players:FindFirstChild(name) end
     return nil
@@ -65,10 +84,7 @@ end
 local function flingTarget(target)
     if not target or not target.Character then return end
     local root = target.Character:FindFirstChild("HumanoidRootPart")
-    if root then
-        -- Резкий толчок вверх (flyjump эффект)
-        root.Velocity = Vector3.new(0, CONFIG.FLING_POWER, 0)
-    end
+    if root then root.Velocity = Vector3.new(0, CONFIG.FLING_POWER, 0) end
 end
 
 local function stopFlying()
@@ -87,45 +103,37 @@ end
 local function flyUnder(target)
     if not target or not target.Character then return end
     stopFlying()
-
-    -- Создаём BodyVelocity для движения (но будем использовать CFrame для noclip)
-    -- Однако для noclip используем CFrame, поэтому BodyVelocity не нужен, но оставим для совместимости.
-    -- Вместо BodyVelocity будем устанавливать CFrame напрямую.
-    -- Удалим BV, оставим только gyro для удержания положения лёжа.
+    bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(1e5,1e5,1e5)
+    bv.Velocity = Vector3.new(0,0,0)
+    bv.Parent = RootPart
     gyro = Instance.new("BodyGyro")
     gyro.MaxTorque = Vector3.new(1e5,1e5,1e5)
     gyro.CFrame = CFrame.new(RootPart.Position, RootPart.Position + Vector3.new(0,-1,0))
     gyro.Parent = RootPart
-
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
     Humanoid.PlatformStand = true
-
     enabled = true
     flyjumpActive = CONFIG.FLYJUMP_ENABLED
     lastFling = 0
-    if statusLabel then
-        statusLabel.Text = "Включено (цель: " .. target.Name .. ")"
-        statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
-    end
+    if statusLabel then statusLabel.Text = "Включено (цель: " .. target.Name .. ")"; statusLabel.TextColor3 = Color3.fromRGB(0,255,150) end
     if toggleBtn then toggleBtn.Text = "⏹ Выключить" end
-
     heartbeatConnection = game:GetService("RunService").Heartbeat:Connect(function()
         if not enabled then return end
         if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
             stopFlying(); return
         end
-
-        -- Перемещение под игроком через CFrame (noclip, стены не мешают)
         local targetPos = target.Character.HumanoidRootPart.Position
         local underPos = targetPos - Vector3.new(0, CONFIG.FOLLOW_DISTANCE, 0)
-        RootPart.CFrame = CFrame.new(underPos)  -- телепорт, игнорируя стены
-
-        -- Удержание лёжа
+        local direction = (underPos - RootPart.Position)
+        if direction.Magnitude > 10 then
+            RootPart.CFrame = CFrame.new(underPos)
+        else
+            bv.Velocity = direction * CONFIG.FLY_SPEED
+        end
         local rot = CFrame.Angles(math.rad(90), 0, 0)
-        RootPart.CFrame = RootPart.CFrame * rot
-
-        -- Подкидывание, если включён flyjump
+        RootPart.CFrame = CFrame.new(RootPart.Position) * rot
         if flyjumpActive then
             if tick() - lastFling > CONFIG.FLING_INTERVAL then
                 flingTarget(target)
@@ -135,7 +143,22 @@ local function flyUnder(target)
     end)
 end
 
--- ===== ESP и выделение ролей =====
+-- ===== Хитбокс себя =====
+local function updateSelfHitbox()
+    if selfHitbox then selfHitbox:Destroy(); selfHitbox = nil end
+    if not RootPart then return end
+    selfHitbox = Instance.new("BoxHandleAdornment")
+    selfHitbox.Name = "SelfHitbox"
+    selfHitbox.Size = Vector3.new(CONFIG.SELF_HITBOX_SIZE, CONFIG.SELF_HITBOX_SIZE, CONFIG.SELF_HITBOX_SIZE)
+    selfHitbox.Adornee = RootPart
+    selfHitbox.Color3 = CONFIG.ESP_COLOR_SELF
+    selfHitbox.Transparency = 0.3
+    selfHitbox.ZIndex = 0
+    selfHitbox.AlwaysOnTop = true
+    selfHitbox.Parent = RootPart
+end
+
+-- ===== ESP =====
 local function clearESP()
     for plr, box in pairs(espBoxes) do if box and box.Parent then box:Destroy() end end
     espBoxes = {}
@@ -143,19 +166,19 @@ local function clearESP()
     roleBoxes = {}
 end
 
-local function createBox(player, color, isESP)
+local function createBox(player, color, name)
     if not player or not player.Character then return nil end
     local char = player.Character
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
-    local old = char:FindFirstChild(isESP and "ESPBox" or "RoleBox")
+    local old = char:FindFirstChild(name)
     if old then old:Destroy() end
     local box = Instance.new("BoxHandleAdornment")
-    box.Name = isESP and "ESPBox" or "RoleBox"
+    box.Name = name
     box.Size = Vector3.new(3,4,1.5)
     box.Adornee = hrp
     box.Color3 = color
-    box.Transparency = isESP and 0.3 or 0.4
+    box.Transparency = 0.3
     box.ZIndex = 0
     box.AlwaysOnTop = true
     box.Parent = char
@@ -164,14 +187,7 @@ end
 
 local function updateESP()
     clearESP()
-    if CONFIG.ESP_ENABLED then
-        for _, plr in ipairs(game.Players:GetPlayers()) do
-            if plr ~= Player then
-                local box = createBox(plr, CONFIG.ESP_COLOR, true)
-                if box then espBoxes[plr] = box end
-            end
-        end
-    end
+    if not CONFIG.ESP_ENABLED then return end
     local murderer, sheriff = nil, nil
     for _, plr in ipairs(game.Players:GetPlayers()) do
         if plr ~= Player then
@@ -180,96 +196,171 @@ local function updateESP()
                 local tool = char:FindFirstChildWhichIsA("Tool")
                 if tool then
                     local name = tool.Name:lower()
-                    if name:find("knife") or name:find("dagger") or name:find("blade") then
-                        murderer = plr
-                    elseif name:find("gun") or name:find("pistol") or name:find("revolver") then
-                        sheriff = plr
-                    end
+                    if name:find("knife") or name:find("dagger") or name:find("blade") then murderer = plr
+                    elseif name:find("gun") or name:find("pistol") or name:find("revolver") then sheriff = plr end
                 end
             end
         end
     end
-    if murderer then
-        local box = createBox(murderer, CONFIG.HIGHLIGHT_MURDERER, false)
-        if box then roleBoxes[murderer] = box end
+    for _, plr in ipairs(game.Players:GetPlayers()) do
+        if plr ~= Player then
+            local color = CONFIG.ESP_COLOR_NORMAL
+            if plr == murderer then color = CONFIG.ESP_COLOR_MURDERER
+            elseif plr == sheriff then color = CONFIG.ESP_COLOR_SHERIFF end
+            local box = createBox(plr, color, "ESPBox")
+            if box then espBoxes[plr] = box end
+        end
     end
-    if sheriff then
-        local box = createBox(sheriff, CONFIG.HIGHLIGHT_SHERIFF, false)
-        if box then roleBoxes[sheriff] = box end
-    end
+    updateSelfHitbox()
 end
-
 game.Players.PlayerAdded:Connect(updateESP)
 game.Players.PlayerRemoving:Connect(updateESP)
 
--- ===== Аимбот (без изменений) =====
+-- ===== FOV КРУГ (всегда на экране) =====
+local function updateFovCircle()
+    if fovCircle then fovCircle:Destroy(); fovCircle = nil end
+    if not CONFIG.FOV_CIRCLE_ENABLED then return end
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    fovCircle = Instance.new("Frame")
+    fovCircle.Name = "FovCircle"
+    fovCircle.Size = UDim2.new(0, CONFIG.FOV_CIRCLE_RADIUS*2, 0, CONFIG.FOV_CIRCLE_RADIUS*2)
+    fovCircle.Position = UDim2.new(0.5, -CONFIG.FOV_CIRCLE_RADIUS, 0.5, -CONFIG.FOV_CIRCLE_RADIUS)
+    fovCircle.BackgroundTransparency = 0.85
+    fovCircle.BackgroundColor3 = CONFIG.FOV_CIRCLE_COLOR
+    fovCircle.BorderSizePixel = 2
+    fovCircle.BorderColor3 = CONFIG.FOV_CIRCLE_COLOR
+    fovCircle.ZIndex = 999
+    fovCircle.Parent = Player.PlayerGui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1,0)
+    corner.Parent = fovCircle
+    -- полупрозрачный круг
+    local inner = Instance.new("Frame")
+    inner.Size = UDim2.new(1, -4, 1, -4)
+    inner.Position = UDim2.new(0, 2, 0, 2)
+    inner.BackgroundTransparency = 0.95
+    inner.BackgroundColor3 = CONFIG.FOV_CIRCLE_COLOR
+    inner.BorderSizePixel = 0
+    inner.Parent = fovCircle
+    local corner2 = Instance.new("UICorner")
+    corner2.CornerRadius = UDim.new(1,0)
+    corner2.Parent = inner
+end
+
+-- ===== Линии к оружию шерифа после его смерти =====
+local function updateSheriffWeaponLine()
+    if sheriffLine then sheriffLine:Destroy(); sheriffLine = nil end
+    if not CONFIG.SHERIFF_WEAPON_LINE_ENABLED then return end
+    -- Ищем шерифа (если мёртв, его оружие может лежать на земле)
+    -- В MM2 оружие выпадает как часть тела или как отдельный объект
+    -- Упрощённо: ищем игрока-шерифа, если он мёртв, ищем его оружие в workspace
+    local sheriff = nil
+    for _, plr in ipairs(game.Players:GetPlayers()) do
+        if plr ~= Player then
+            local char = plr.Character
+            if char then
+                local tool = char:FindFirstChildWhichIsA("Tool")
+                if tool and (tool.Name:lower():find("gun") or tool.Name:lower():find("pistol") or tool.Name:lower():find("revolver")) then
+                    sheriff = plr
+                    break
+                end
+            end
+        end
+    end
+    if not sheriff or sheriff.Character then return end -- если жив, линия не нужна
+    -- Ищем выпавшее оружие (обычно оно под именем "Tool" или "Handle")
+    local weapon = nil
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Tool") and obj.Name:lower():find("gun") then
+            weapon = obj
+            break
+        end
+    end
+    if not weapon then return end
+    -- Создаём линию от камеры к оружию
+    local line = Instance.new("Frame")
+    line.Name = "SheriffWeaponLine"
+    line.BackgroundColor3 = CONFIG.SHERIFF_WEAPON_LINE_COLOR
+    line.BorderSizePixel = 0
+    line.Size = UDim2.new(0, 2, 0, 0)
+    line.ZIndex = 998
+    line.Parent = Player.PlayerGui
+    -- Обновляем позицию линии каждый кадр
+    local conn
+    conn = game:GetService("RunService").Heartbeat:Connect(function()
+        if not CONFIG.SHERIFF_WEAPON_LINE_ENABLED or not weapon or not weapon.Parent then
+            if line then line:Destroy() end
+            if conn then conn:Disconnect() end
+            return
+        end
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local weaponPos = weapon.Position
+        local screenPos, onScreen = camera:WorldToViewportPoint(weaponPos)
+        if not onScreen then return end
+        local center = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+        local lineLength = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+        local angle = math.atan2(screenPos.Y - center.Y, screenPos.X - center.X)
+        line.Size = UDim2.new(0, 2, 0, lineLength)
+        line.Position = UDim2.new(0.5, 0, 0.5, 0)
+        line.Rotation = math.deg(angle)
+        line.BackgroundColor3 = CONFIG.SHERIFF_WEAPON_LINE_COLOR
+    end)
+    sheriffLine = {line = line, connection = conn}
+end
+
+-- ===== Аимбот =====
+local VirtualUser = game:GetService("VirtualUser")
 local function getAimbotTarget(weapon, isMurderer, isSheriff)
     local camera = workspace.CurrentCamera
     local cameraPos = camera.CFrame.Position
     local cameraDir = camera.CFrame.LookVector
-
     local bestScore = math.huge
     local bestTarget = nil
-
     for _, plr in ipairs(game.Players:GetPlayers()) do
         if plr == Player then continue end
         if not plr.Character then continue end
         local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
-
-        local isTargetMurderer = false
-        local isTargetSheriff = false
+        local isTargetMurderer, isTargetSheriff = false, false
         local tool = plr.Character:FindFirstChildWhichIsA("Tool")
         if tool then
             local name = tool.Name:lower()
             if name:find("knife") or name:find("dagger") or name:find("blade") then isTargetMurderer = true end
             if name:find("gun") or name:find("pistol") or name:find("revolver") then isTargetSheriff = true end
         end
-
         if isMurderer then
-            if isTargetSheriff then continue end
-            if isTargetMurderer then continue end
+            if isTargetSheriff or isTargetMurderer then continue end
         elseif isSheriff then
             if not isTargetMurderer then continue end
             local dist = (hrp.Position - cameraPos).Magnitude
             if dist > CONFIG.SHERIFF_RADIUS then continue end
-        else
-            continue
-        end
-
+        else continue end
         local dist = (hrp.Position - cameraPos).Magnitude
         if dist > CONFIG.AIMBOT_RADIUS then continue end
-
         local toTarget = (hrp.Position - cameraPos).Unit
         local angle = math.deg(math.acos(cameraDir:Dot(toTarget)))
         if angle > CONFIG.AIMBOT_FOV then continue end
-
         local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position)
         if not onScreen then continue end
         local screenCenter = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
         local offset = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-        if offset < bestScore then
-            bestScore = offset
-            bestTarget = plr
-        end
+        if offset < bestScore then bestScore = offset; bestTarget = plr end
     end
     return bestTarget
 end
 
 local function startAimbot()
-    for _, conn in ipairs(aimbotConnections) do
-        if conn and conn.heartbeat then conn.heartbeat:Disconnect() end
-    end
+    for _, conn in ipairs(aimbotConnections) do if conn and conn.heartbeat then conn.heartbeat:Disconnect() end end
     aimbotConnections = {}
     if not CONFIG.AIMBOT_ENABLED then return end
-
     local function onWeaponEquipped(tool)
         if not tool then return end
         local toolName = tool.Name:lower()
         local isMurderer = toolName:find("knife") or toolName:find("dagger") or toolName:find("blade")
         local isSheriff = toolName:find("gun") or toolName:find("pistol") or toolName:find("revolver")
         if not isMurderer and not isSheriff then return end
-
         local conn
         conn = game:GetService("RunService").Heartbeat:Connect(function()
             if not enabled then return end
@@ -279,73 +370,95 @@ local function startAimbot()
                 if targetHrp then
                     local camera = workspace.CurrentCamera
                     camera.CFrame = CFrame.new(camera.CFrame.Position, targetHrp.Position)
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(0,0), camera.CFrame.Position)
                 end
             end
         end)
         table.insert(aimbotConnections, {heartbeat = conn})
     end
-
     Character.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then
-            onWeaponEquipped(child)
-        end
+        if child:IsA("Tool") then onWeaponEquipped(child) end
     end)
-
     for _, tool in ipairs(Character:GetChildren()) do
-        if tool:IsA("Tool") then
-            onWeaponEquipped(tool)
-        end
+        if tool:IsA("Tool") then onWeaponEquipped(tool) end
     end
 end
-
 startAimbot()
 
--- ===== GUI =====
+-- ===== КРАСИВОЕ ПЕРЕЛИВАЮЩЕЕСЯ МЕНЮ =====
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FlingMenu"
 screenGui.Parent = Player.PlayerGui
 screenGui.ResetOnSpawn = false
 
--- Основное окно (центр)
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 460, 0, 700)
-mainFrame.Position = UDim2.new(0.5, -230, 0.5, -350)
-mainFrame.BackgroundColor3 = CONFIG.GUI_BG_COLOR
-mainFrame.BackgroundTransparency = CONFIG.GUI_BG_TRANSPARENCY
+mainFrame.Size = UDim2.new(0, 520, 0, 780)
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -390)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20,22,30)
+mainFrame.BackgroundTransparency = 0.1
 mainFrame.BorderSizePixel = 0
 mainFrame.Visible = false
 mainFrame.Active = true
 mainFrame.Draggable = true
 mainFrame.Parent = screenGui
-
 local cornerMain = Instance.new("UICorner")
-cornerMain.CornerRadius = UDim.new(0, 20)
+cornerMain.CornerRadius = UDim.new(0, 25)
 cornerMain.Parent = mainFrame
 
+-- Градиентный фон (переливающийся)
+local bgGradient = Instance.new("UIGradient")
+bgGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(60,0,100)),
+    ColorSequenceKeypoint.new(0.3, Color3.fromRGB(0,100,200)),
+    ColorSequenceKeypoint.new(0.6, Color3.fromRGB(200,0,150)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0,200,100))
+}
+bgGradient.Rotation = 0
+bgGradient.Parent = mainFrame
+
+-- Анимация градиента
+local gradAngle = 0
+game:GetService("RunService").Heartbeat:Connect(function()
+    if not mainFrame.Visible then return end
+    gradAngle = gradAngle + 0.2
+    bgGradient.Rotation = gradAngle % 360
+end)
+
+-- Тень
 local shadow = Instance.new("ImageLabel")
-shadow.Size = UDim2.new(1, 20, 1, 20)
-shadow.Position = UDim2.new(0, -10, 0, -10)
+shadow.Size = UDim2.new(1, 30, 1, 30)
+shadow.Position = UDim2.new(0, -15, 0, -15)
 shadow.BackgroundTransparency = 1
 shadow.Image = "rbxassetid://1316044259"
 shadow.ImageColor3 = Color3.fromRGB(0,0,0)
-shadow.ImageTransparency = 0.6
+shadow.ImageTransparency = 0.5
 shadow.ZIndex = 0
 shadow.Parent = mainFrame
 
--- Заголовок
+-- Заголовок с переливом
 local header = Instance.new("Frame")
-header.Size = UDim2.new(1,0,0,55)
+header.Size = UDim2.new(1,0,0,60)
 header.Position = UDim2.new(0,0,0,0)
-header.BackgroundColor3 = Color3.fromRGB(40,45,60)
+header.BackgroundColor3 = Color3.fromRGB(30,35,50)
+header.BackgroundTransparency = 0.2
 header.BorderSizePixel = 0
 header.Parent = mainFrame
 local cornerHeader = Instance.new("UICorner")
-cornerHeader.CornerRadius = UDim.new(0,20)
+cornerHeader.CornerRadius = UDim.new(0,25)
 cornerHeader.Parent = header
+local headerGrad = Instance.new("UIGradient")
+headerGrad.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255,0,150)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0,255,200)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255,200,0))
+}
+headerGrad.Rotation = 45
+headerGrad.Parent = header
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(0.8,0,1,0)
-title.Position = UDim2.new(0,10,0,0)
+title.Position = UDim2.new(0,15,0,0)
 title.BackgroundTransparency = 1
 title.Text = "✦ Fling Controller ✦"
 title.TextColor3 = Color3.fromRGB(255,255,255)
@@ -353,10 +466,9 @@ title.TextScaled = true
 title.Font = Enum.Font.GothamBold
 title.Parent = header
 
--- Кнопка закрытия скрипта
 local closeScriptBtn = Instance.new("TextButton")
-closeScriptBtn.Size = UDim2.new(0,35,0,35)
-closeScriptBtn.Position = UDim2.new(1,-45,0,10)
+closeScriptBtn.Size = UDim2.new(0,40,0,40)
+closeScriptBtn.Position = UDim2.new(1,-50,0,10)
 closeScriptBtn.BackgroundColor3 = Color3.fromRGB(200,30,30)
 closeScriptBtn.Text = "✕"
 closeScriptBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -365,22 +477,23 @@ closeScriptBtn.Font = Enum.Font.GothamBold
 closeScriptBtn.BorderSizePixel = 0
 closeScriptBtn.Parent = mainFrame
 local cornerCS = Instance.new("UICorner")
-cornerCS.CornerRadius = UDim.new(0,10)
+cornerCS.CornerRadius = UDim.new(0,12)
 cornerCS.Parent = closeScriptBtn
 closeScriptBtn.MouseButton1Click:Connect(function()
     stopFlying()
     clearESP()
+    if fovCircle then fovCircle:Destroy() end
+    if sheriffLine then sheriffLine.line:Destroy(); sheriffLine.connection:Disconnect() end
     screenGui:Destroy()
     print("Скрипт остановлен.")
 end)
 
--- Палитра цветов (сверху)
+-- Палитра цветов фона (дополнительная, поверх градиента)
 local paletteFrame = Instance.new("Frame")
-paletteFrame.Size = UDim2.new(1,0,0,30)
-paletteFrame.Position = UDim2.new(0,0,0,60)
+paletteFrame.Size = UDim2.new(1,0,0,35)
+paletteFrame.Position = UDim2.new(0,0,0,65)
 paletteFrame.BackgroundTransparency = 1
 paletteFrame.Parent = mainFrame
-
 local colors = {
     Color3.fromRGB(15,15,20), Color3.fromRGB(50,55,65),
     Color3.fromRGB(20,40,25), Color3.fromRGB(25,60,55),
@@ -390,7 +503,6 @@ local colors = {
     Color3.fromRGB(150,0,150), Color3.fromRGB(30,150,100),
     Color3.fromRGB(255,105,180), Color3.fromRGB(255,255,255)
 }
-
 for i, color in ipairs(colors) do
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.06,0,1,0)
@@ -403,18 +515,17 @@ for i, color in ipairs(colors) do
     corner.CornerRadius = UDim.new(0,5)
     corner.Parent = btn
     btn.MouseButton1Click:Connect(function()
-        local oldGrad = mainFrame:FindFirstChildWhichIsA("UIGradient")
-        if oldGrad then oldGrad:Destroy() end
         mainFrame.BackgroundColor3 = color
-        mainFrame.BackgroundTransparency = CONFIG.GUI_BG_TRANSPARENCY
-        CONFIG.GUI_BG_COLOR = color
+        mainFrame.BackgroundTransparency = 0.15
+        -- убираем градиент, если он мешает
+        bgGradient.Enabled = false
     end)
 end
 
 -- Статус
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1,0,0,25)
-statusLabel.Position = UDim2.new(0,0,0,95)
+statusLabel.Size = UDim2.new(1,0,0,30)
+statusLabel.Position = UDim2.new(0,0,0,105)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Text = "Выключено"
 statusLabel.TextColor3 = Color3.fromRGB(255,70,70)
@@ -422,10 +533,10 @@ statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.GothamSemibold
 statusLabel.Parent = mainFrame
 
--- Кнопка включения основного режима
+-- Кнопка включения
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size = UDim2.new(0.8,0,0,40)
-toggleBtn.Position = UDim2.new(0.1,0,0,125)
+toggleBtn.Position = UDim2.new(0.1,0,0,140)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(60,70,100)
 toggleBtn.Text = "▶ Включить"
 toggleBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -454,158 +565,61 @@ toggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Переключатель Flyjump (отдельно)
-local flyjumpBtn = Instance.new("TextButton")
-flyjumpBtn.Size = UDim2.new(0.8,0,0,30)
-flyjumpBtn.Position = UDim2.new(0.1,0,0,170)
-flyjumpBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
-flyjumpBtn.Text = "Flyjump: Выкл"
-flyjumpBtn.TextColor3 = Color3.fromRGB(255,255,255)
-flyjumpBtn.TextScaled = true
-flyjumpBtn.Font = Enum.Font.Gotham
-flyjumpBtn.BorderSizePixel = 0
-flyjumpBtn.Parent = mainFrame
-local cornerFJ = Instance.new("UICorner")
-cornerFJ.CornerRadius = UDim.new(0,10)
-cornerFJ.Parent = flyjumpBtn
-flyjumpBtn.MouseButton1Click:Connect(function()
-    CONFIG.FLYJUMP_ENABLED = not CONFIG.FLYJUMP_ENABLED
-    flyjumpBtn.Text = "Flyjump: " .. (CONFIG.FLYJUMP_ENABLED and "Вкл" or "Выкл")
-    if enabled then
-        flyjumpActive = CONFIG.FLYJUMP_ENABLED
-        if flyjumpActive then
-            statusLabel.Text = "Flyjump активен"
-            statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
-        else
-            statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
-            statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
+-- ===== Функция создания сворачиваемых секций =====
+local function createSection(titleText, yStart)
+    local sectionBtn = Instance.new("TextButton")
+    sectionBtn.Size = UDim2.new(0.9,0,0,30)
+    sectionBtn.Position = UDim2.new(0.05,0,0,yStart)
+    sectionBtn.BackgroundColor3 = Color3.fromRGB(40,45,60)
+    sectionBtn.Text = "▶ " .. titleText
+    sectionBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    sectionBtn.TextScaled = true
+    sectionBtn.Font = Enum.Font.GothamBold
+    sectionBtn.BorderSizePixel = 0
+    sectionBtn.Parent = mainFrame
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = sectionBtn
+    local content = Instance.new("Frame")
+    content.Size = UDim2.new(0.9,0,0,0)
+    content.Position = UDim2.new(0.05,0,0,yStart+34)
+    content.BackgroundTransparency = 1
+    content.Visible = false
+    content.Parent = mainFrame
+    local open = false
+    sectionBtn.MouseButton1Click:Connect(function()
+        open = not open
+        content.Visible = open
+        sectionBtn.Text = (open and "▼ " or "▶ ") .. titleText
+        local totalHeight = 0
+        for _, child in ipairs(content:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("TextButton") or child:IsA("TextLabel") then
+                totalHeight = totalHeight + child.Size.Y.Offset + 4
+            end
         end
-    end
-end)
-
--- Кнопка выбора цели (открывает отдельное окно слева)
-local playerListBtn = Instance.new("TextButton")
-playerListBtn.Size = UDim2.new(0.8,0,0,30)
-playerListBtn.Position = UDim2.new(0.1,0,0,210)
-playerListBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
-playerListBtn.Text = "Выбрать цель: " .. (CONFIG.TARGET_NAME ~= "" and CONFIG.TARGET_NAME or "авто")
-playerListBtn.TextColor3 = Color3.fromRGB(255,255,255)
-playerListBtn.TextScaled = true
-playerListBtn.Font = Enum.Font.Gotham
-playerListBtn.BorderSizePixel = 0
-playerListBtn.Parent = mainFrame
-local cornerPL = Instance.new("UICorner")
-cornerPL.CornerRadius = UDim.new(0,10)
-cornerPL.Parent = playerListBtn
-
--- Отдельное окно для списка игроков (слева от главного)
-local playerListFrame = Instance.new("Frame")
-playerListFrame.Size = UDim2.new(0, 200, 0, 300)
-playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0) -- слева, чуть ниже
-playerListFrame.BackgroundColor3 = Color3.fromRGB(30,35,45)
-playerListFrame.BackgroundTransparency = 0.2
-playerListFrame.BorderSizePixel = 0
-playerListFrame.Visible = false
-playerListFrame.Active = true
-playerListFrame.Draggable = true
-playerListFrame.Parent = screenGui
-local cornerPLF = Instance.new("UICorner")
-cornerPLF.CornerRadius = UDim.new(0,12)
-cornerPLF.Parent = playerListFrame
-
-local plTitle = Instance.new("TextLabel")
-plTitle.Size = UDim2.new(1,0,0,30)
-plTitle.Position = UDim2.new(0,0,0,0)
-plTitle.BackgroundColor3 = Color3.fromRGB(40,45,60)
-plTitle.Text = "Игроки"
-plTitle.TextColor3 = Color3.fromRGB(255,255,255)
-plTitle.TextScaled = true
-plTitle.Font = Enum.Font.GothamBold
-plTitle.Parent = playerListFrame
-local cornerPLT = Instance.new("UICorner")
-cornerPLT.CornerRadius = UDim.new(0,12)
-cornerPLT.Parent = plTitle
-
-local plScrolling = Instance.new("ScrollingFrame")
-plScrolling.Size = UDim2.new(1,0,1,-30)
-plScrolling.Position = UDim2.new(0,0,0,30)
-plScrolling.BackgroundTransparency = 1
-plScrolling.CanvasSize = UDim2.new(0,0,0,0)
-plScrolling.ScrollBarThickness = 8
-plScrolling.Parent = playerListFrame
-
-local plLayout = Instance.new("UIListLayout")
-plLayout.Padding = UDim.new(0,4)
-plLayout.SortOrder = Enum.SortOrder.Name
-plLayout.Parent = plScrolling
-
-local function updatePlayerListWindow()
-    for _, child in ipairs(plScrolling:GetChildren()) do
-        if child:IsA("TextButton") then child:Destroy() end
-    end
-    local ySize = 0
-    for _, plr in ipairs(game.Players:GetPlayers()) do
-        if plr ~= Player then
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1,0,0,25)
-            btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
-            btn.Text = plr.Name
-            btn.TextColor3 = Color3.fromRGB(255,255,255)
-            btn.TextScaled = true
-            btn.Font = Enum.Font.Gotham
-            btn.BorderSizePixel = 0
-            btn.Parent = plScrolling
-            local corner = Instance.new("UICorner")
-            corner.CornerRadius = UDim.new(0,6)
-            corner.Parent = btn
-            btn.MouseButton1Click:Connect(function()
-                CONFIG.TARGET_NAME = plr.Name
-                playerListBtn.Text = "Выбрать цель: " .. plr.Name
-                playerListFrame.Visible = false
-                if enabled then
-                    local newTarget = getTarget()
-                    if newTarget then
-                        flyUnder(newTarget)
-                    else
-                        stopFlying()
-                        statusLabel.Text = "Цель не найдена!"
-                        statusLabel.TextColor3 = Color3.fromRGB(255,0,0)
-                    end
-                end
-            end)
-            ySize = ySize + 25 + 4
-        end
-    end
-    plScrolling.CanvasSize = UDim2.new(0,0,0,ySize)
+        content.Size = UDim2.new(0.9,0,0,totalHeight)
+    end)
+    return content
 end
 
-playerListBtn.MouseButton1Click:Connect(function()
-    playerListFrame.Visible = not playerListFrame.Visible
-    if playerListFrame.Visible then
-        updatePlayerListWindow()
-        -- позиционируем окно слева от главного
-        playerListFrame.Position = UDim2.new(0.01, 0, 0.1, 0)
-    end
-end)
-
--- Слайдеры (сдвинуты вниз из-за новой кнопки flyjump)
-local function createSlider(labelText, yPos, minVal, maxVal, step, getter, setter)
+-- ===== Создание слайдера в секции =====
+local function createSliderInSection(parent, labelText, yPos, minVal, maxVal, step, getter, setter)
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0.8,0,0,22)
-    label.Position = UDim2.new(0.1,0,0,yPos)
+    label.Size = UDim2.new(0.6,0,0,22)
+    label.Position = UDim2.new(0.05,0,0,yPos)
     label.BackgroundTransparency = 1
     label.Text = labelText .. getter()
     label.TextColor3 = Color3.fromRGB(200,200,220)
     label.TextScaled = true
     label.Font = Enum.Font.Gotham
-    label.Parent = mainFrame
+    label.Parent = parent
 
     local sliderFrame = Instance.new("Frame")
     sliderFrame.Size = UDim2.new(0.8,0,0,12)
     sliderFrame.Position = UDim2.new(0.1,0,0,yPos+25)
     sliderFrame.BackgroundColor3 = Color3.fromRGB(50,55,70)
     sliderFrame.BorderSizePixel = 0
-    sliderFrame.Parent = mainFrame
+    sliderFrame.Parent = parent
     local cornerSlider = Instance.new("UICorner")
     cornerSlider.CornerRadius = UDim.new(0,6)
     cornerSlider.Parent = sliderFrame
@@ -613,7 +627,7 @@ local function createSlider(labelText, yPos, minVal, maxVal, step, getter, sette
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new(0.5,0,1,0)
     fill.Position = UDim2.new(0,0,0,0)
-    fill.BackgroundColor3 = CONFIG.GUI_ACCENT
+    fill.BackgroundColor3 = Color3.fromRGB(0,180,255)
     fill.BorderSizePixel = 0
     fill.Parent = sliderFrame
     local cornerFill = Instance.new("UICorner")
@@ -657,207 +671,206 @@ local function createSlider(labelText, yPos, minVal, maxVal, step, getter, sette
 
     leftBtn.MouseButton1Click:Connect(function()
         local newVal = math.max(minVal, getter() - step)
-        setter(newVal)
-        update()
+        setter(newVal); update()
     end)
     rightBtn.MouseButton1Click:Connect(function()
         local newVal = math.min(maxVal, getter() + step)
-        setter(newVal)
-        update()
+        setter(newVal); update()
     end)
     update()
     return label
 end
 
-createSlider("Сила: ", 250, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
-createSlider("Дистанция: ", 310, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
-createSlider("Интервал: ", 370, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
-createSlider("Скорость Fly: ", 430, 1, 20, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
+-- ===== Создание кнопки-переключателя в секции =====
+local function createToggleInSection(parent, labelText, yPos, getter, setter)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.8,0,0,30)
+    btn.Position = UDim2.new(0.1,0,0,yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(50,55,70)
+    btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        setter(not getter())
+        btn.Text = labelText .. (getter() and "Вкл" or "Выкл")
+        -- обновить соответствующие элементы
+        if labelText:find("FOV") then updateFovCircle()
+        elseif labelText:find("Линии") then updateSheriffWeaponLine()
+        elseif labelText:find("Хитбокс") then updateSelfHitbox()
+        elseif labelText:find("ESP") then updateESP()
+        elseif labelText:find("Аимбот") then startAimbot()
+        elseif labelText:find("Flyjump") then
+            CONFIG.FLYJUMP_ENABLED = getter()
+            if enabled then flyjumpActive = CONFIG.FLYJUMP_ENABLED end
+        end
+    end)
+    return btn
+end
 
--- Настройки ESP
-local espY = 490
-local espToggle = Instance.new("TextButton")
-espToggle.Size = UDim2.new(0.25,0,0,25)
-espToggle.Position = UDim2.new(0.05,0,0,espY)
-espToggle.BackgroundColor3 = Color3.fromRGB(50,55,70)
-espToggle.Text = "ESP: Выкл"
-espToggle.TextColor3 = Color3.fromRGB(255,255,255)
-espToggle.TextScaled = true
-espToggle.Font = Enum.Font.Gotham
-espToggle.BorderSizePixel = 0
-espToggle.Parent = mainFrame
-local cornerET = Instance.new("UICorner")
-cornerET.CornerRadius = UDim.new(0,8)
-cornerET.Parent = espToggle
-espToggle.MouseButton1Click:Connect(function()
-    CONFIG.ESP_ENABLED = not CONFIG.ESP_ENABLED
-    espToggle.Text = "ESP: " .. (CONFIG.ESP_ENABLED and "Вкл" or "Выкл")
-    updateESP()
-end)
+-- ===== СОЗДАНИЕ СЕКЦИЙ =====
+local flingSection = createSection("Fling", 190)
+createSliderInSection(flingSection, "Сила: ", 0, 10, 500, 5, function() return CONFIG.FLING_POWER end, function(v) CONFIG.FLING_POWER = v end)
+createSliderInSection(flingSection, "Дистанция: ", 35, 0.5, 10, 0.5, function() return CONFIG.FOLLOW_DISTANCE end, function(v) CONFIG.FOLLOW_DISTANCE = v end)
+createSliderInSection(flingSection, "Интервал: ", 70, 0.1, 2, 0.1, function() return CONFIG.FLING_INTERVAL end, function(v) CONFIG.FLING_INTERVAL = v end)
+createSliderInSection(flingSection, "Скорость Fly: ", 105, 1, 20, 0.5, function() return CONFIG.FLY_SPEED end, function(v) CONFIG.FLY_SPEED = v end)
+createToggleInSection(flingSection, "Flyjump: ", 140, function() return CONFIG.FLYJUMP_ENABLED end, function(v) CONFIG.FLYJUMP_ENABLED = v end)
 
-local espColorBtn = Instance.new("TextButton")
-espColorBtn.Size = UDim2.new(0.06,0,0,20)
-espColorBtn.Position = UDim2.new(0.35,0,0,espY+2)
-espColorBtn.BackgroundColor3 = CONFIG.ESP_COLOR
-espColorBtn.Text = ""
-espColorBtn.BorderSizePixel = 0
-espColorBtn.Parent = mainFrame
-local cornerEC = Instance.new("UICorner")
-cornerEC.CornerRadius = UDim.new(0,5)
-cornerEC.Parent = espColorBtn
-local espColors = {Color3.fromRGB(0,255,0), Color3.fromRGB(255,255,0), Color3.fromRGB(255,0,255), Color3.fromRGB(0,255,255)}
-espColorBtn.MouseButton1Click:Connect(function()
-    for i, c in ipairs(espColors) do
-        if c == CONFIG.ESP_COLOR then
-            CONFIG.ESP_COLOR = espColors[i % #espColors + 1]
-            break
+local espSection = createSection("ESP", 190+180)
+createToggleInSection(espSection, "ESP: ", 0, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end)
+-- Цвета для ESP (будем использовать кнопки с цветами)
+local function createColorPicker(parent, labelText, yPos, getter, setter)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.4,0,0,22)
+    label.Position = UDim2.new(0.05,0,0,yPos)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(200,200,220)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.Parent = parent
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.08,0,0,20)
+    btn.Position = UDim2.new(0.5,0,0,yPos+1)
+    btn.BackgroundColor3 = getter()
+    btn.Text = ""
+    btn.BorderSizePixel = 0
+    btn.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,5)
+    corner.Parent = btn
+    btn.MouseButton1Click:Connect(function()
+        local colors = {Color3.fromRGB(255,0,0), Color3.fromRGB(0,255,0), Color3.fromRGB(0,0,255), Color3.fromRGB(255,255,0), Color3.fromRGB(255,0,255), Color3.fromRGB(0,255,255), Color3.fromRGB(255,255,255)}
+        for i, c in ipairs(colors) do
+            if c == getter() then
+                setter(colors[i % #colors + 1])
+                break
+            end
+        end
+        btn.BackgroundColor3 = getter()
+        updateESP()
+    end)
+    return btn
+end
+createColorPicker(espSection, "Обычные: ", 35, function() return CONFIG.ESP_COLOR_NORMAL end, function(v) CONFIG.ESP_COLOR_NORMAL = v end)
+createColorPicker(espSection, "Убийца: ", 65, function() return CONFIG.ESP_COLOR_MURDERER end, function(v) CONFIG.ESP_COLOR_MURDERER = v end)
+createColorPicker(espSection, "Шериф: ", 95, function() return CONFIG.ESP_COLOR_SHERIFF end, function(v) CONFIG.ESP_COLOR_SHERIFF = v end)
+createColorPicker(espSection, "Свой: ", 125, function() return CONFIG.ESP_COLOR_SELF end, function(v) CONFIG.ESP_COLOR_SELF = v end)
+
+local hitboxSection = createSection("Хитбокс себя", 190+180+170)
+createSliderInSection(hitboxSection, "Размер: ", 0, 1, 10, 0.5, function() return CONFIG.SELF_HITBOX_SIZE end, function(v) CONFIG.SELF_HITBOX_SIZE = v end)
+createToggleInSection(hitboxSection, "Показать: ", 35, function() return CONFIG.ESP_ENABLED end, function(v) CONFIG.ESP_ENABLED = v end) -- используем ESP как триггер
+
+local fovSection = createSection("FOV Круг", 190+180+170+100)
+createToggleInSection(fovSection, "FOV круг: ", 0, function() return CONFIG.FOV_CIRCLE_ENABLED end, function(v) CONFIG.FOV_CIRCLE_ENABLED = v end)
+createSliderInSection(fovSection, "Радиус круга: ", 35, 50, 300, 5, function() return CONFIG.FOV_CIRCLE_RADIUS end, function(v) CONFIG.FOV_CIRCLE_RADIUS = v end)
+createColorPicker(fovSection, "Цвет круга: ", 70, function() return CONFIG.FOV_CIRCLE_COLOR end, function(v) CONFIG.FOV_CIRCLE_COLOR = v end)
+
+local sheriffSection = createSection("Линии к оружию шерифа", 190+180+170+100+140)
+createToggleInSection(sheriffSection, "Линии: ", 0, function() return CONFIG.SHERIFF_WEAPON_LINE_ENABLED end, function(v) CONFIG.SHERIFF_WEAPON_LINE_ENABLED = v end)
+createColorPicker(sheriffSection, "Цвет линии: ", 35, function() return CONFIG.SHERIFF_WEAPON_LINE_COLOR end, function(v) CONFIG.SHERIFF_WEAPON_LINE_COLOR = v end)
+
+local aimbotSection = createSection("Аимбот", 190+180+170+100+140+100)
+createToggleInSection(aimbotSection, "Аимбот: ", 0, function() return CONFIG.AIMBOT_ENABLED end, function(v) CONFIG.AIMBOT_ENABLED = v end)
+createSliderInSection(aimbotSection, "FOV: ", 35, 5, 180, 5, function() return CONFIG.AIMBOT_FOV end, function(v) CONFIG.AIMBOT_FOV = v end)
+createSliderInSection(aimbotSection, "Радиус: ", 70, 10, 500, 10, function() return CONFIG.AIMBOT_RADIUS end, function(v) CONFIG.AIMBOT_RADIUS = v end)
+createSliderInSection(aimbotSection, "Радиус шерифа: ", 105, 10, 500, 10, function() return CONFIG.SHERIFF_RADIUS end, function(v) CONFIG.SHERIFF_RADIUS = v end)
+
+-- ===== Выбор цели (отдельное окно) =====
+local playerListBtn = Instance.new("TextButton")
+playerListBtn.Size = UDim2.new(0.8,0,0,30)
+playerListBtn.Position = UDim2.new(0.1,0,0, 190+180+170+100+140+100+150) -- динамически
+playerListBtn.BackgroundColor3 = Color3.fromRGB(50,55,70)
+playerListBtn.Text = "Выбрать цель: " .. (CONFIG.TARGET_NAME ~= "" and CONFIG.TARGET_NAME or "авто")
+playerListBtn.TextColor3 = Color3.fromRGB(255,255,255)
+playerListBtn.TextScaled = true
+playerListBtn.Font = Enum.Font.Gotham
+playerListBtn.BorderSizePixel = 0
+playerListBtn.Parent = mainFrame
+local cornerPL = Instance.new("UICorner")
+cornerPL.CornerRadius = UDim.new(0,10)
+cornerPL.Parent = playerListBtn
+
+local playerListFrame = Instance.new("Frame")
+playerListFrame.Size = UDim2.new(0, 200, 0, 300)
+playerListFrame.Position = UDim2.new(0.02, 0, 0.1, 0)
+playerListFrame.BackgroundColor3 = Color3.fromRGB(30,35,45)
+playerListFrame.BackgroundTransparency = 0.2
+playerListFrame.BorderSizePixel = 0
+playerListFrame.Visible = false
+playerListFrame.Active = true
+playerListFrame.Draggable = true
+playerListFrame.Parent = screenGui
+local cornerPLF = Instance.new("UICorner")
+cornerPLF.CornerRadius = UDim.new(0,12)
+cornerPLF.Parent = playerListFrame
+local plTitle = Instance.new("TextLabel")
+plTitle.Size = UDim2.new(1,0,0,30)
+plTitle.Position = UDim2.new(0,0,0,0)
+plTitle.BackgroundColor3 = Color3.fromRGB(40,45,60)
+plTitle.Text = "Игроки"
+plTitle.TextColor3 = Color3.fromRGB(255,255,255)
+plTitle.TextScaled = true
+plTitle.Font = Enum.Font.GothamBold
+plTitle.Parent = playerListFrame
+local cornerPLT = Instance.new("UICorner")
+cornerPLT.CornerRadius = UDim.new(0,12)
+cornerPLT.Parent = plTitle
+local plScrolling = Instance.new("ScrollingFrame")
+plScrolling.Size = UDim2.new(1,0,1,-30)
+plScrolling.Position = UDim2.new(0,0,0,30)
+plScrolling.BackgroundTransparency = 1
+plScrolling.CanvasSize = UDim2.new(0,0,0,0)
+plScrolling.ScrollBarThickness = 8
+plScrolling.Parent = playerListFrame
+local plLayout = Instance.new("UIListLayout")
+plLayout.Padding = UDim.new(0,4)
+plLayout.SortOrder = Enum.SortOrder.Name
+plLayout.Parent = plScrolling
+local function updatePlayerListWindow()
+    for _, child in ipairs(plScrolling:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    local ySize = 0
+    for _, plr in ipairs(game.Players:GetPlayers()) do
+        if plr ~= Player then
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1,0,0,25)
+            btn.BackgroundColor3 = Color3.fromRGB(60,65,85)
+            btn.Text = plr.Name
+            btn.TextColor3 = Color3.fromRGB(255,255,255)
+            btn.TextScaled = true
+            btn.Font = Enum.Font.Gotham
+            btn.BorderSizePixel = 0
+            btn.Parent = plScrolling
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(0,6)
+            corner.Parent = btn
+            btn.MouseButton1Click:Connect(function()
+                CONFIG.TARGET_NAME = plr.Name
+                playerListBtn.Text = "Выбрать цель: " .. plr.Name
+                playerListFrame.Visible = false
+                if enabled then
+                    local newTarget = getTarget()
+                    if newTarget then flyUnder(newTarget)
+                    else stopFlying(); statusLabel.Text = "Цель не найдена!"; statusLabel.TextColor3 = Color3.fromRGB(255,0,0) end
+                end
+            end)
+            ySize = ySize + 25 + 4
         end
     end
-    espColorBtn.BackgroundColor3 = CONFIG.ESP_COLOR
-    updateESP()
+    plScrolling.CanvasSize = UDim2.new(0,0,0,ySize)
+end
+playerListBtn.MouseButton1Click:Connect(function()
+    playerListFrame.Visible = not playerListFrame.Visible
+    if playerListFrame.Visible then updatePlayerListWindow() end
 end)
 
--- Аимбот настройки
-local aimbotY = 525
-local aimbotToggle = Instance.new("TextButton")
-aimbotToggle.Size = UDim2.new(0.25,0,0,25)
-aimbotToggle.Position = UDim2.new(0.05,0,0,aimbotY)
-aimbotToggle.BackgroundColor3 = Color3.fromRGB(50,55,70)
-aimbotToggle.Text = "Аимбот: Вкл"
-aimbotToggle.TextColor3 = Color3.fromRGB(255,255,255)
-aimbotToggle.TextScaled = true
-aimbotToggle.Font = Enum.Font.Gotham
-aimbotToggle.BorderSizePixel = 0
-aimbotToggle.Parent = mainFrame
-local cornerAT = Instance.new("UICorner")
-cornerAT.CornerRadius = UDim.new(0,8)
-cornerAT.Parent = aimbotToggle
-aimbotToggle.MouseButton1Click:Connect(function()
-    CONFIG.AIMBOT_ENABLED = not CONFIG.AIMBOT_ENABLED
-    aimbotToggle.Text = "Аимбот: " .. (CONFIG.AIMBOT_ENABLED and "Вкл" or "Выкл")
-    startAimbot()
-end)
-
-local fovLabel = Instance.new("TextLabel")
-fovLabel.Size = UDim2.new(0.15,0,0,20)
-fovLabel.Position = UDim2.new(0.4,0,0,aimbotY)
-fovLabel.BackgroundTransparency = 1
-fovLabel.Text = "FOV: " .. CONFIG.AIMBOT_FOV
-fovLabel.TextColor3 = Color3.fromRGB(200,200,220)
-fovLabel.TextScaled = true
-fovLabel.Font = Enum.Font.Gotham
-fovLabel.Parent = mainFrame
-
-local fovLeft = Instance.new("TextButton")
-fovLeft.Size = UDim2.new(0.04,0,0,20)
-fovLeft.Position = UDim2.new(0.55,0,0,aimbotY+2)
-fovLeft.BackgroundColor3 = Color3.fromRGB(60,65,85)
-fovLeft.Text = "◀"
-fovLeft.TextColor3 = Color3.fromRGB(255,255,255)
-fovLeft.TextScaled = true
-fovLeft.Font = Enum.Font.Gotham
-fovLeft.BorderSizePixel = 0
-fovLeft.Parent = mainFrame
-local cornerFL = Instance.new("UICorner")
-cornerFL.CornerRadius = UDim.new(0,5)
-cornerFL.Parent = fovLeft
-fovLeft.MouseButton1Click:Connect(function()
-    CONFIG.AIMBOT_FOV = math.max(5, CONFIG.AIMBOT_FOV - 5)
-    fovLabel.Text = "FOV: " .. CONFIG.AIMBOT_FOV
-end)
-
-local fovRight = Instance.new("TextButton")
-fovRight.Size = UDim2.new(0.04,0,0,20)
-fovRight.Position = UDim2.new(0.6,0,0,aimbotY+2)
-fovRight.BackgroundColor3 = Color3.fromRGB(60,65,85)
-fovRight.Text = "▶"
-fovRight.TextColor3 = Color3.fromRGB(255,255,255)
-fovRight.TextScaled = true
-fovRight.Font = Enum.Font.Gotham
-fovRight.BorderSizePixel = 0
-fovRight.Parent = mainFrame
-local cornerFR = Instance.new("UICorner")
-cornerFR.CornerRadius = UDim.new(0,5)
-cornerFR.Parent = fovRight
-fovRight.MouseButton1Click:Connect(function()
-    CONFIG.AIMBOT_FOV = math.min(180, CONFIG.AIMBOT_FOV + 5)
-    fovLabel.Text = "FOV: " .. CONFIG.AIMBOT_FOV
-end)
-
-local copyFovBtn = Instance.new("TextButton")
-copyFovBtn.Size = UDim2.new(0.06,0,0,20)
-copyFovBtn.Position = UDim2.new(0.66,0,0,aimbotY+2)
-copyFovBtn.BackgroundColor3 = Color3.fromRGB(40,80,120)
-copyFovBtn.Text = "📋"
-copyFovBtn.TextColor3 = Color3.fromRGB(255,255,255)
-copyFovBtn.TextScaled = true
-copyFovBtn.Font = Enum.Font.Gotham
-copyFovBtn.BorderSizePixel = 0
-copyFovBtn.Parent = mainFrame
-local cornerCF = Instance.new("UICorner")
-cornerCF.CornerRadius = UDim.new(0,5)
-cornerCF.Parent = copyFovBtn
-copyFovBtn.MouseButton1Click:Connect(function()
-    setclipboard(tostring(CONFIG.AIMBOT_FOV))
-    statusLabel.Text = "FOV скопирован: " .. CONFIG.AIMBOT_FOV
-    statusLabel.TextColor3 = Color3.fromRGB(255,255,0)
-    wait(2)
-    if enabled then
-        statusLabel.Text = "Включено (цель: " .. (TARGET and TARGET.Name or "?") .. ")"
-        statusLabel.TextColor3 = Color3.fromRGB(0,255,150)
-    else
-        statusLabel.Text = "Выключено"
-        statusLabel.TextColor3 = Color3.fromRGB(255,70,70)
-    end
-end)
-
-local radiusLabel = Instance.new("TextLabel")
-radiusLabel.Size = UDim2.new(0.2,0,0,20)
-radiusLabel.Position = UDim2.new(0.05,0,0,aimbotY+30)
-radiusLabel.BackgroundTransparency = 1
-radiusLabel.Text = "Радиус: " .. CONFIG.AIMBOT_RADIUS
-radiusLabel.TextColor3 = Color3.fromRGB(200,200,220)
-radiusLabel.TextScaled = true
-radiusLabel.Font = Enum.Font.Gotham
-radiusLabel.Parent = mainFrame
-
-local radLeft = Instance.new("TextButton")
-radLeft.Size = UDim2.new(0.04,0,0,20)
-radLeft.Position = UDim2.new(0.25,0,0,aimbotY+32)
-radLeft.BackgroundColor3 = Color3.fromRGB(60,65,85)
-radLeft.Text = "◀"
-radLeft.TextColor3 = Color3.fromRGB(255,255,255)
-radLeft.TextScaled = true
-radLeft.Font = Enum.Font.Gotham
-radLeft.BorderSizePixel = 0
-radLeft.Parent = mainFrame
-local cornerRL = Instance.new("UICorner")
-cornerRL.CornerRadius = UDim.new(0,5)
-cornerRL.Parent = radLeft
-radLeft.MouseButton1Click:Connect(function()
-    CONFIG.AIMBOT_RADIUS = math.max(10, CONFIG.AIMBOT_RADIUS - 10)
-    radiusLabel.Text = "Радиус: " .. CONFIG.AIMBOT_RADIUS
-end)
-
-local radRight = Instance.new("TextButton")
-radRight.Size = UDim2.new(0.04,0,0,20)
-radRight.Position = UDim2.new(0.3,0,0,aimbotY+32)
-radRight.BackgroundColor3 = Color3.fromRGB(60,65,85)
-radRight.Text = "▶"
-radRight.TextColor3 = Color3.fromRGB(255,255,255)
-radRight.TextScaled = true
-radRight.Font = Enum.Font.Gotham
-radRight.BorderSizePixel = 0
-radRight.Parent = mainFrame
-local cornerRR = Instance.new("UICorner")
-cornerRR.CornerRadius = UDim.new(0,5)
-cornerRR.Parent = radRight
-radRight.MouseButton1Click:Connect(function()
-    CONFIG.AIMBOT_RADIUS = math.min(500, CONFIG.AIMBOT_RADIUS + 10)
-    radiusLabel.Text = "Радиус: " .. CONFIG.AIMBOT_RADIUS
-end)
-
--- Открытие меню по правому Shift
+-- ===== Открытие меню по правому Shift =====
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
@@ -872,6 +885,8 @@ game:GetService("UserInputService").InputBegan:Connect(function(input, gameProce
                 statusLabel.TextColor3 = Color3.fromRGB(255,70,70)
             end
             updateESP()
+            updateFovCircle()
+            updateSheriffWeaponLine()
         end
     end
 end)
